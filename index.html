@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WOS Tracker Pro - V2.2</title>
+    <title>WOS Tracker Pro - V2.3</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,8 +12,6 @@
     <style>
         body { font-family: 'Noto Sans KR', sans-serif; background: #0f172a; color: #f1f5f9; }
         .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
-        .btn-blue { background: #3b82f6; transition: all 0.2s; }
-        .btn-blue:hover { background: #2563eb; transform: scale(1.02); }
     </style>
 </head>
 <body>
@@ -24,6 +22,7 @@
 
         const CONFIG = {
             GAS_URL: "https://script.google.com/macros/s/AKfycbxM8qa36ZkYfNjHBDAcB9yQQHh7CESM4T5-B_n6pmHqGqxHiMyUxoH_igCrWHuKDU5m/exec",
+            // ★ 주의: 계속 안 되면 구글 AI 스튜디오에서 이 키를 새로 발급받아 교체해야 할 수 있습니다.
             API_KEY: "AIzaSyCVgqua6AyL-IWFhO68gxRHb5JY8aJd8H4"
         };
 
@@ -51,9 +50,9 @@
                             reader.readAsDataURL(file);
                         });
 
-                        // [핵심] v1beta 주소 고정 및 콘솔 로그 추가
-                        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${CONFIG.API_KEY}`;
-                        console.log("연결 시도 주소:", API_URL);
+                        // [핵심 변경] 모델 이름에 -latest 를 붙였습니다.
+                        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${CONFIG.API_KEY}`;
+                        console.log("🔥 [V2.3] 연결 시도 주소:", API_URL);
 
                         const response = await fetch(API_URL, {
                             method: "POST",
@@ -68,7 +67,12 @@
                             })
                         });
 
-                        if (!response.ok) throw new Error(`API 응답 실패: ${response.status}`);
+                        // [핵심 변경] 에러 발생 시 구글 서버의 상세 응답을 콘솔에 텍스트로 찍어냅니다.
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error("🚨 구글 서버 상세 에러 메시지:", errorText);
+                            throw new Error(`상태코드 ${response.status}: 콘솔(F12)을 확인해주세요.`);
+                        }
                         
                         const resData = await response.json();
                         const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -79,7 +83,6 @@
                         }
                     }
 
-                    // 마스터 명단과 대조
                     const processed = [...new Set(rawNames)].map(name => {
                         const clean = name.trim();
                         const found = masterList.find(m => clean.includes(m.name) || m.name.includes(clean));
@@ -91,7 +94,7 @@
 
                 } catch (err) {
                     console.error("에러 상세:", err);
-                    alert(`분석 오류: ${err.message}\n브라우저의 추적 방지 설정을 꺼보세요.`);
+                    alert(`분석 오류 발생!\n${err.message}`);
                 } finally {
                     setLoading(false);
                 }
@@ -101,7 +104,7 @@
                 <div className="max-w-md mx-auto min-h-screen p-4 flex flex-col">
                     <header className="py-6 text-center">
                         <h1 className="text-2xl font-bold text-blue-400 tracking-tight">WOS TRACKER PRO</h1>
-                        <p className="text-[10px] text-slate-500 uppercase tracking-widest">Version 2.2 - Active</p>
+                        <p className="text-[10px] text-orange-400 font-bold uppercase tracking-widest">Version 2.3 - Deep Debug</p>
                     </header>
 
                     <main className="flex-1 space-y-4">

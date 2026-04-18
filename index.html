@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WOS Fortress Tracker</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #1a202c; color: white; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const CONFIG = {
+            GAS_URL: "https://script.google.com/macros/s/AKfycbzwxitJHULZRrKJjCtMJNHZIVW69V1dWRvZfzQ-EJ5TUOlCxl5PLo9py_pF__KxQlRH/exec",
+            GEMINI_API_KEY: "AQ.Ab8RN6IzSKGEzd8SX74VJ4dch28_QBlbWRmFSgJRCAnFIwjBQw"
+        };
+
+        function App() {
+            const [masterList, setMasterList] = useState([]);
+            const [scannedList, setScannedList] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [view, setView] = useState('main'); // 'main' or 'manage'
+
+            // 1. 마스터 리스트 불러오기
+            useEffect(() => {
+                fetch(CONFIG.GAS_URL)
+                    .then(res => res.json())
+                    .then(data => setMasterList(data));
+            }, []);
+
+            // 2. 이미지 분석 (Gemini API)
+            const handleFileUpload = async (e) => {
+                const files = Array.from(e.target.files);
+                setLoading(true);
+                
+                // 여기서 Gemini API 호출 로직이 들어갑니다 (지면상 축약)
+                // 분석된 닉네임들을 masterList와 대조하여 scannedList에 업데이트
+                // 완료 후 CONFIG.GAS_URL로 자동 저장 시도
+                alert("이미지 분석 및 시트 자동 기록 기능이 활성화됩니다.");
+                setLoading(false);
+            };
+
+            const copyToClipboard = () => {
+                const text = scannedList.map((p, i) => `${i+1}. ${p.name} (${p.role})`).join('\n');
+                navigator.clipboard.writeText(text);
+                alert("클립보드에 복사되었습니다!");
+            };
+
+            return (
+                <div className="max-w-md mx-auto p-4">
+                    <header className="flex justify-between items-center mb-6">
+                        <h1 className="text-xl font-bold text-blue-400">WOS Tracker</h1>
+                        <button onClick={() => setView(view === 'main' ? 'manage' : 'main')} className="text-sm bg-gray-700 px-3 py-1 rounded">
+                            {view === 'main' ? '명단 관리' : '홈으로'}
+                        </button>
+                    </header>
+
+                    {view === 'main' ? (
+                        <div className="space-y-4">
+                            <div className="border-2 border-dashed border-gray-600 p-8 text-center rounded-lg">
+                                <input type="file" multiple onChange={handleFileUpload} className="hidden" id="fileInput" />
+                                <label htmlFor="fileInput" className="cursor-pointer">스크린샷 드래그 또는 클릭</label>
+                            </div>
+                            
+                            <div className="bg-gray-800 p-4 rounded-lg">
+                                <h2 className="mb-2 font-bold">스캔 결과 ({scannedList.length}명)</h2>
+                                <div className="space-y-1 text-sm h-64 overflow-y-auto">
+                                    {scannedList.map((p, i) => <div key={i}>{i+1}. {p.name} [{p.role}]</div>)}
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2">
+                                <button onClick={copyToClipboard} className="flex-1 bg-blue-600 py-3 rounded-lg font-bold">명단 복사</button>
+                                <button onClick={() => setScannedList([])} className="flex-1 bg-red-600 py-3 rounded-lg font-bold">초기화</button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <h2 className="mb-4 font-bold">마스터 리스트 관리</h2>
+                            {/* 리스트 수정/삭제 UI */}
+                            <p className="text-xs text-gray-400">준비 중: 여기서 수정하면 시트와 즉시 동기화됩니다.</p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

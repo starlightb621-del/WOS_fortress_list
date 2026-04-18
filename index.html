@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WOS Tracker Pro - V3.4 Final</title>
+    <title>WOS Tracker Pro - V3.6 Stable</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -24,10 +24,8 @@
 
         const CONFIG = {
             GAS_URL: "https://script.google.com/macros/s/AKfycbxM8qa36ZkYfNjHBDAcB9yQQHh7CESM4T5-B_n6pmHqGqxHiMyUxoH_igCrWHuKDU5m/exec",
-            // ★ 여기에 새로 발급받은 Gemini API 키를 입력하세요!
-            API_KEY: "AIzaSyDhGPJeBpAFzSTgi9FwMNZ5T4-cfoYnGA8",
-            // 가장 범용적인 모델 명칭으로 고정합니다.
-            MODEL: "gemini-1.5-flash"
+            // ★ 여기에 새로 발급받은 'Active' 상태의 API 키를 입력하세요!
+            API_KEY: "여기에_새로_발급받은_키_넣기"
         };
 
         function App() {
@@ -48,13 +46,13 @@
                 if (!files.length) return;
 
                 setLoading(true);
-                setStatusMsg("분석 시작...");
+                setStatusMsg("분석 엔진 가동 중...");
                 
                 let allExtractedNames = [];
 
                 try {
                     for (let i = 0; i < files.length; i++) {
-                        setStatusMsg(`${i + 1}/${files.length} 이미지 분석 중...`);
+                        setStatusMsg(`${i + 1}/${files.length} 분석 중...`);
                         const file = files[i];
                         
                         const base64Data = await new Promise(resolve => {
@@ -63,8 +61,8 @@
                             reader.readAsDataURL(file);
                         });
 
-                        // v1beta 대신 안정적인 v1 경로를 사용하고 모델명을 명확히 전달합니다.
-                        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${CONFIG.MODEL}:generateContent?key=${CONFIG.API_KEY}`;
+                        // [장애 해결 포인트] v1beta 경로와 models/ 접두사를 사용한 정식 주소
+                        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${CONFIG.API_KEY}`;
                         
                         const response = await fetch(API_URL, {
                             method: "POST",
@@ -72,7 +70,7 @@
                             body: JSON.stringify({
                                 contents: [{
                                     parts: [
-                                        { text: "Extract nicknames starting with [GOM] tag from this image and return them as a JSON array like {\"names\": [\"name1\", \"name2\"]}. Only Korean or English nicknames." },
+                                        { text: "이 이미지에서 [GOM] 태그 바로 뒤에 오는 닉네임들만 모두 추출해줘. JSON 형식으로 응답해줘. 예: {\"names\": [\"닉네임1\", \"닉네임2\"]}" },
                                         { inline_data: { mime_type: "image/jpeg", data: base64Data } }
                                     ]
                                 }]
@@ -81,24 +79,21 @@
 
                         const resData = await response.json();
                         
-                        // 상세 에러 핸들링
+                        // API 키 만료나 경로 오류(404, 403) 체크
                         if (resData.error) {
-                            console.error("API Error Detail:", resData.error);
-                            throw new Error(resData.error.message || "API 호출 실패");
+                            throw new Error(`[구글 AI 오류] ${resData.error.message}`);
                         }
 
                         const aiText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
                         const jsonMatch = aiText.match(/\{.*\}/s);
                         
                         if (jsonMatch) {
-                            try {
-                                const parsed = JSON.parse(jsonMatch[0]);
-                                if (parsed.names) allExtractedNames = [...allExtractedNames, ...parsed.names];
-                            } catch (e) { console.error("JSON 파싱 실패"); }
+                            const parsed = JSON.parse(jsonMatch[0]);
+                            if (parsed.names) allExtractedNames = [...allExtractedNames, ...parsed.names];
                         }
                     }
 
-                    // 마스터 리스트 대조 및 누적
+                    // 마스터 리스트 대조 및 중복 제거
                     const processedData = allExtractedNames.map(name => {
                         const cleanName = name.trim();
                         const match = masterList.find(m => cleanName.includes(m.name) || m.name.includes(cleanName));
@@ -112,10 +107,10 @@
                         );
                     });
 
-                    setStatusMsg("분석 완료!");
+                    setStatusMsg("스캔 완료!");
                 } catch (err) {
-                    console.error("오류 발생:", err);
-                    alert("구글 AI 응답 오류: " + err.message);
+                    console.error("장애 발생:", err);
+                    alert(err.message);
                     setStatusMsg("오류 발생");
                 } finally {
                     setLoading(false);
@@ -127,7 +122,7 @@
                 <div className="max-w-md mx-auto min-h-screen p-4 flex flex-col">
                     <header className="py-8 text-center">
                         <h1 className="text-3xl font-bold text-blue-400 tracking-tighter" style={{fontFamily: 'Orbitron'}}>WOS TRACKER PRO</h1>
-                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-[0.2em] mt-1">Version 3.4 - API Stable</p>
+                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-[0.2em] mt-1">Version 3.6 - Final Stable</p>
                     </header>
 
                     <main className="flex-1 space-y-6">
@@ -138,19 +133,19 @@
                         </div>
 
                         {loading && (
-                            <div className="flex items-center justify-center space-x-2 text-blue-400 animate-pulse">
-                                <span className="text-xs font-bold tracking-widest">{statusMsg}</span>
+                            <div className="text-center text-blue-400 text-xs font-bold animate-pulse">
+                                {statusMsg}
                             </div>
                         )}
 
-                        <div className="glass rounded-[1.5rem] overflow-hidden">
+                        <div className="glass rounded-[1.5rem] overflow-hidden flex flex-col">
                             <div className="p-4 bg-slate-800/80 flex justify-between items-center border-b border-white/5">
                                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">스캔 결과 ({scannedList.length}명)</span>
-                                <button onClick={() => setScannedList([])} className="text-[10px] text-red-500 font-bold">전체 삭제</button>
+                                <button onClick={() => setScannedList([])} className="text-[10px] text-red-500 font-bold">초기화</button>
                             </div>
                             <div className="max-h-[450px] overflow-y-auto custom-scroll">
                                 {scannedList.length === 0 ? (
-                                    <p className="py-20 text-center text-slate-600 text-xs italic">대기 중... 사진을 올려주세요.</p>
+                                    <p className="py-20 text-center text-slate-600 text-xs italic">이미지를 업로드해 주세요.</p>
                                 ) : (
                                     scannedList.map((p, i) => (
                                         <div key={i} className="flex justify-between p-4 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
@@ -164,7 +159,7 @@
                             </div>
                         </div>
                     </main>
-                    <footer className="py-6 text-center text-[10px] text-slate-600 uppercase tracking-widest">DEVELOPED FOR WOS FORTRESS MANAGEMENT</footer>
+                    <footer className="py-6 text-center text-[10px] text-slate-600 uppercase tracking-widest">WOS Fortress Management System</footer>
                 </div>
             );
         }

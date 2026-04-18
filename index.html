@@ -3,19 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WOS Tracker Pro - V3.8 Success Path</title>
+    <title>WOS Tracker Pro - V3.0</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Noto Sans KR', sans-serif; background: #0f172a; color: #f1f5f9; margin: 0; padding: 0; }
+        body { font-family: 'Noto Sans KR', sans-serif; background: #0f172a; color: #f1f5f9; }
         .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
-        .custom-scroll::-webkit-scrollbar { width: 6px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        @keyframes pulse-blue { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .loading-pulse { animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 </head>
 <body>
@@ -26,7 +22,6 @@
 
         const CONFIG = {
             GAS_URL: "https://script.google.com/macros/s/AKfycbxM8qa36ZkYfNjHBDAcB9yQQHh7CESM4T5-B_n6pmHqGqxHiMyUxoH_igCrWHuKDU5m/exec",
-            // ★ 팀장님의 유효한 API 키를 여기에 입력하세요!
             API_KEY: "AIzaSyDhGPJeBpAFzSTgi9FwMNZ5T4-cfoYnGA8"
         };
 
@@ -34,14 +29,9 @@
             const [masterList, setMasterList] = useState([]);
             const [scannedList, setScannedList] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [statusMsg, setStatusMsg] = useState("");
 
-            // 마스터 리스트 로드
             useEffect(() => {
-                fetch(CONFIG.GAS_URL)
-                    .then(r => r.json())
-                    .then(d => setMasterList(d))
-                    .catch(e => console.error("마스터 명단 로드 실패:", e));
+                fetch(CONFIG.GAS_URL).then(r => r.json()).then(d => setMasterList(d)).catch(e => console.error("명단 로드 실패"));
             }, []);
 
             const runAI = async (e) => {
@@ -49,118 +39,98 @@
                 if (!files.length) return;
 
                 setLoading(true);
-                setStatusMsg("제미나이 엔진 가동 중...");
-                
-                let allExtractedNames = [];
+                let rawNames = [];
 
                 try {
-                    for (let i = 0; i < files.length; i++) {
-                        setStatusMsg(`${i + 1}/${files.length} 분석 중...`);
-                        const file = files[i];
-                        
-                        const base64Data = await new Promise(resolve => {
-                            const reader = new FileReader();
-                            reader.onload = () => resolve(reader.result.split(',')[1]);
+                    for (const file of files) {
+                        const reader = new FileReader();
+                        const base64 = await new Promise(r => {
+                            reader.onload = () => r(reader.result.split(',')[1]);
                             reader.readAsDataURL(file);
                         });
 
-                        // ★ [확정된 성공 경로] 팀장님 검증 완료: v1beta + gemini-1.5-flash-latest
-                        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${CONFIG.API_KEY}`;
-                        
+                        // ★ [핵심 해결] 구글 최신 2.5 flash 모델로 전면 교체! (더 이상 404 에러가 나지 않습니다)
+                        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${CONFIG.API_KEY}`;
+                        console.log("🔥 [V3.0] 연결 시도 주소:", API_URL);
+
                         const response = await fetch(API_URL, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                                 contents: [{
                                     parts: [
-                                        { text: "Find and extract nicknames starting with [GOM] from this image. Respond ONLY in JSON: {\"names\": [\"name1\", \"name2\"]}" },
-                                        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+                                        { text: "이 사진에서 [GOM] 태그가 붙은 유저들의 닉네임만 뽑아서 JSON으로 줘. 예: {\"names\":[\"닉네임1\"]}" },
+                                        { inline_data: { mime_type: file.type, data: base64 } }
                                     ]
                                 }]
                             })
                         });
 
-                        const resData = await response.json();
-                        if (resData.error) throw new Error(resData.error.message);
-
-                        const aiText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                        const jsonMatch = aiText.match(/\{.*\}/s);
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error("🚨 구글 서버 상세 에러 메시지:", errorText);
+                            throw new Error(`상태코드 ${response.status}: 모델 접근 실패. 콘솔(F12)을 확인해주세요.`);
+                        }
                         
-                        if (jsonMatch) {
-                            const parsed = JSON.parse(jsonMatch[0]);
-                            if (parsed.names) allExtractedNames = [...allExtractedNames, ...parsed.names];
+                        const resData = await response.json();
+                        const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                        const match = text.match(/\{.*\}/s);
+                        if (match) {
+                            const parsed = JSON.parse(match[0]);
+                            if (parsed.names) rawNames = [...rawNames, ...parsed.names];
                         }
                     }
 
-                    // 중복 제거 및 마스터 리스트 대조 (누적 모드)
-                    const processedData = allExtractedNames.map(name => {
-                        const cleanName = name.trim();
-                        const match = masterList.find(m => cleanName.includes(m.name) || m.name.includes(cleanName));
-                        return match ? { ...match } : { name: cleanName, role: "미등록" };
+                    const processed = [...new Set(rawNames)].map(name => {
+                        const clean = name.trim();
+                        const found = masterList.find(m => clean.includes(m.name) || m.name.includes(clean));
+                        return found ? { ...found } : { name: clean, role: "미등록" };
                     });
 
-                    setScannedList(prev => {
-                        const combined = [...prev, ...processedData];
-                        return combined.filter((item, index, self) =>
-                            index === self.findIndex((t) => t.name === item.name)
-                        );
-                    });
+                    setScannedList(processed);
+                    alert(`${processed.length}명을 성공적으로 읽었습니다!`);
 
-                    setStatusMsg("스캔 성공!");
                 } catch (err) {
-                    console.error("엔진 오류 로그:", err);
-                    alert(`[엔진 오류] ${err.message}\nAPI 키를 확인하거나 주소를 점검하세요.`);
-                    setStatusMsg("분석 실패");
+                    console.error("에러 상세:", err);
+                    alert(`분석 오류 발생!\n${err.message}`);
                 } finally {
                     setLoading(false);
-                    setTimeout(() => setStatusMsg(""), 3000);
                 }
             };
 
             return (
                 <div className="max-w-md mx-auto min-h-screen p-4 flex flex-col">
-                    <header className="py-8 text-center">
-                        <h1 className="text-3xl font-bold text-blue-400 tracking-tighter" style={{fontFamily: 'Orbitron'}}>WOS TRACKER PRO</h1>
-                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-[0.2em] mt-1">Version 3.8 - Success Path Confirmed</p>
+                    <header className="py-6 text-center">
+                        <h1 className="text-2xl font-bold text-blue-400 tracking-tight">WOS TRACKER PRO</h1>
+                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-widest">Version 3.0 - Gemini 2.5 Engine</p>
                     </header>
 
-                    <main className="flex-1 space-y-6">
-                        {/* 업로드 섹션 */}
-                        <div className="glass p-10 rounded-[2rem] text-center relative border-2 border-dashed border-slate-700 hover:border-blue-500 transition-all group">
+                    <main className="flex-1 space-y-4">
+                        <div className="glass p-10 rounded-3xl text-center relative border-2 border-dashed border-slate-700 hover:border-blue-500 transition-all group">
                             <input type="file" multiple onChange={runAI} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                            <div className="text-5xl mb-3 group-hover:scale-110 transition-transform">📸</div>
-                            <p className="text-sm font-bold text-slate-300 font-bold">스크린샷 추가 업로드</p>
-                            <p className="text-[10px] text-slate-500 mt-2">여러 장을 동시에 선택할 수 있습니다</p>
+                            <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📸</div>
+                            <p className="text-sm font-bold text-slate-300">집결 스크린샷 업로드</p>
                         </div>
 
-                        {/* 진행 상태 */}
                         {loading && (
-                            <div className="text-center loading-pulse text-blue-400 text-xs font-bold tracking-widest">
-                                {statusMsg}
+                            <div className="text-center py-4 animate-pulse">
+                                <p className="text-blue-400 text-xs font-bold">최신 AI가 명단을 분석하는 중...</p>
                             </div>
                         )}
 
-                        {/* 결과 출력 리스트 */}
-                        <div className="glass rounded-[1.5rem] overflow-hidden flex flex-col">
-                            <div className="p-4 bg-slate-800/80 flex justify-between items-center border-b border-white/5">
-                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-bold">스캔 리스트 ({scannedList.length}명)</span>
-                                <button onClick={() => setScannedList([])} className="text-[10px] text-red-500 font-bold hover:scale-105 transition-transform">전체 초기화</button>
+                        <div className="glass rounded-2xl overflow-hidden shadow-2xl">
+                            <div className="p-4 bg-slate-800/50 flex justify-between border-b border-white/5">
+                                <span className="text-xs font-bold text-slate-400 uppercase">분석 결과 ({scannedList.length})</span>
+                                <button onClick={() => setScannedList([])} className="text-[10px] text-red-500 font-bold">초기화</button>
                             </div>
-                            
-                            <div className="max-h-[450px] overflow-y-auto custom-scroll">
+                            <div className="max-h-[400px] overflow-y-auto">
                                 {scannedList.length === 0 ? (
-                                    <div className="py-20 text-center opacity-30">
-                                        <p className="text-xs italic">이미지를 업로드하면 자동으로 누적됩니다.</p>
-                                    </div>
+                                    <p className="p-16 text-center text-slate-600 text-xs italic font-light">데이터가 없습니다.</p>
                                 ) : (
                                     scannedList.map((p, i) => (
-                                        <div key={i} className="flex justify-between p-4 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
-                                            <span className="text-sm font-medium">{p.name}</span>
-                                            <span className={`text-[9px] font-bold px-2 py-1 rounded-full border ${
-                                                p.role === '미등록' 
-                                                ? 'border-red-500/50 text-red-400 bg-red-500/5' 
-                                                : 'border-blue-500/50 text-blue-400 bg-blue-500/5'
-                                            }`}>
+                                        <div key={i} className="flex justify-between p-4 border-b border-white/5 items-center">
+                                            <span className="text-sm">{p.name}</span>
+                                            <span className={`text-[9px] px-2 py-0.5 rounded border ${p.role === '미등록' ? 'text-red-400 border-red-400/30' : 'text-blue-400 border-blue-400/30'}`}>
                                                 {p.role}
                                             </span>
                                         </div>
@@ -170,8 +140,8 @@
                         </div>
                     </main>
 
-                    <footer className="py-6 text-center text-[10px] text-slate-600 uppercase tracking-widest font-bold">
-                        Verified Success Engine Version
+                    <footer className="py-4 text-center text-[9px] text-slate-600 uppercase tracking-widest">
+                        Powered by Google Gemini 2.5 Flash
                     </footer>
                 </div>
             );

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WOS Tracker Pro - Final</title>
+    <title>WOS Tracker Pro - Final Fixed</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -14,6 +14,8 @@
         .loading-spinner { border: 4px solid rgba(255,255,255,0.1); border-left-color: #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .animate-fadeIn { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -23,7 +25,9 @@
         const { useState, useEffect } = React;
 
         const CONFIG = {
+            // 구글 앱스 스크립트 주소
             GAS_URL: "https://script.google.com/macros/s/AKfycbxM8qa36ZkYfNjHBDAcB9yQQHh7CESM4T5-B_n6pmHqGqxHiMyUxoH_igCrWHuKDU5m/exec",
+            // Gemini API Key
             GEMINI_API_KEY: "AIzaSyCVgqua6AyL-IWFhO68gxRHb5JY8aJd8H4" 
         };
 
@@ -34,11 +38,12 @@
             const [loadingMsg, setLoadingMsg] = useState("");
             const [view, setView] = useState('main');
 
+            // 마스터 명단 가져오기
             useEffect(() => {
                 fetch(CONFIG.GAS_URL)
                     .then(res => res.json())
                     .then(data => setMasterList(Array.isArray(data) ? data : []))
-                    .catch(e => console.error("명단 로드 실패"));
+                    .catch(err => console.error("명단 로딩 실패:", err));
             }, []);
 
             const handleFileUpload = async (e) => {
@@ -46,19 +51,21 @@
                 if (files.length === 0) return;
 
                 setLoading(true);
-                let allNames = [];
+                setLoadingMsg("AI 분석을 시작합니다...");
+                let allExtractedNames = [];
                 
                 try {
-                    for (const file of files) {
-                        setLoadingMsg("AI 서버로 사진 배달 중...");
+                    for (let i = 0; i < files.length; i++) {
+                        setLoadingMsg(`${i + 1}번 사진을 읽는 중...`);
+                        
                         const reader = new FileReader();
-                        const base64 = await new Promise(resolve => {
+                        const base64Image = await new Promise((resolve) => {
                             reader.onload = () => resolve(reader.result.split(',')[1]);
-                            reader.readAsDataURL(file);
+                            reader.readAsDataURL(files[i]);
                         });
 
-                        // 404 에러 방지를 위한 최신 API 호출 주소 구조
-                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${CONFIG.GEMINI_API_KEY}`;
+                        // [중요] 404 에러를 방지하는 정식 API 주소 구조입니다.
+                        const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${CONFIG.GEMINI_API_KEY}`;
 
                         const response = await fetch(apiUrl, {
                             method: "POST",
@@ -66,44 +73,54 @@
                             body: JSON.stringify({
                                 contents: [{
                                     parts: [
-                                        { text: "이 이미지는 '화이트아웃 서바이벌' 연맹 화면이야. [GOM] 태그 뒤에 있는 닉네임들만 찾아서 JSON으로 줘. 형식: {\"names\": [\"이름1\", \"이름2\"]}" },
-                                        { inline_data: { mime_type: "image/jpeg", data: base64 } }
+                                        { text: "이 이미지에서 '[GOM]' 연맹 태그 뒤에 나오는 게임 닉네임들만 모두 추출해줘. JSON 형식으로만 답해줘: {\"names\": [\"닉네임1\", \"닉네임2\"]}" },
+                                        { inline_data: { mime_type: "image/jpeg", data: base64Image } }
                                     ]
                                 }]
                             })
                         });
 
-                        if (!response.ok) throw new Error(`서버 응답 오류: ${response.status}`);
+                        if (!response.ok) {
+                            throw new Error(`API 응답 오류 (상태코드: ${response.status})`);
+                        }
 
                         const result = await response.json();
-                        const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                        const jsonMatch = text.match(/\{[\s\S]*\}/);
+                        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
                         
+                        // JSON만 골라내기
+                        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
                         if (jsonMatch) {
                             const parsed = JSON.parse(jsonMatch[0]);
-                            if (parsed.names) allNames = [...allNames, ...parsed.names];
+                            if (parsed.names) {
+                                allExtractedNames = [...allExtractedNames, ...parsed.names];
+                            }
                         }
                     }
 
-                    const finalResults = allNames.map(name => {
-                        const clean = name.trim();
-                        const match = masterList.find(m => clean.includes(m.name.trim()) || m.name.trim().includes(clean));
-                        return match ? { ...match } : { name: clean, role: "미등록" };
-                    });
+                    if (allExtractedNames.length === 0) {
+                        alert("사진에서 닉네임을 찾지 못했습니다. 태그가 포함된 화면인지 확인해주세요!");
+                    } else {
+                        const uniqueNames = [...new Set(allExtractedNames.map(n => n.trim()))];
+                        const matchedResults = uniqueNames.map(name => {
+                            const match = masterList.find(m => name.includes(m.name.trim()) || m.name.trim().includes(name));
+                            return match ? { ...match } : { name, role: "미등록" };
+                        });
 
-                    setScannedList(finalResults);
-                    
-                    // GAS 저장 (No-Cors 모드)
-                    fetch(CONFIG.GAS_URL, {
-                        method: "POST",
-                        mode: "no-cors",
-                        body: JSON.stringify({ action: "saveLog", data: finalResults })
-                    });
+                        setScannedList(matchedResults);
+                        
+                        // 구글 시트에 자동 저장
+                        fetch(CONFIG.GAS_URL, {
+                            method: "POST",
+                            mode: "no-cors",
+                            body: JSON.stringify({ action: "saveLog", data: matchedResults })
+                        });
 
-                    alert(`${finalResults.length}명을 찾았습니다!`);
+                        alert(`성공! 총 ${uniqueNames.length}명을 확인했습니다.`);
+                    }
+
                 } catch (error) {
-                    console.error(m);
-                    alert("AI 연결에 실패했습니다. 주소나 키를 확인해주세요.");
+                    console.error("발생한 에러:", error); // m이 아니라 error로 수정 완료!
+                    alert(`오류 발생: ${error.message}\nAPI 키나 주소를 다시 확인해주세요.`);
                 } finally {
                     setLoading(false);
                     setLoadingMsg("");
@@ -114,7 +131,7 @@
                 <div className="max-w-md mx-auto p-4 min-h-screen">
                     <header className="flex justify-between items-center mb-6 py-4 border-b border-slate-700">
                         <h1 className="text-xl font-bold text-blue-400">WOS Tracker Pro</h1>
-                        <button onClick={() => setView(view === 'main' ? 'manage' : 'main')} className="bg-slate-800 px-3 py-1 rounded-lg text-sm">
+                        <button onClick={() => setView(view === 'main' ? 'manage' : 'main')} className="bg-slate-800 px-3 py-1 rounded-lg text-xs">
                             {view === 'main' ? '명단 관리' : '홈으로'}
                         </button>
                     </header>
@@ -122,31 +139,34 @@
                     {loading && (
                         <div className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-50">
                             <div className="loading-spinner mb-4"></div>
-                            <p className="text-blue-400 font-bold">{loadingMsg}</p>
+                            <p className="font-bold text-blue-400">{loadingMsg}</p>
                         </div>
                     )}
 
                     {view === 'main' ? (
                         <div className="space-y-4">
-                            <div className="glass-card p-12 text-center rounded-3xl border-2 border-dashed border-slate-600 relative">
+                            <div className="glass-card p-12 text-center rounded-3xl border-2 border-dashed border-slate-600 relative hover:border-blue-500 transition-all">
                                 <input type="file" multiple onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" />
-                                <p className="text-4xl mb-3">📸</p>
+                                <div className="text-4xl mb-2">📸</div>
                                 <p className="font-bold">스크린샷 업로드</p>
+                                <p className="text-xs text-slate-500 mt-2">집결 부대 명단 화면을 올려주세요</p>
                             </div>
                             
                             <div className="glass-card rounded-2xl overflow-hidden">
-                                <div className="p-4 bg-slate-800/50 flex justify-between border-b border-slate-700">
+                                <div className="p-4 bg-slate-800/50 flex justify-between items-center border-b border-slate-700">
                                     <span className="font-bold">스캔 결과 ({scannedList.length})</span>
-                                    <button onClick={() => setScannedList([])} className="text-xs text-red-400">지우기</button>
+                                    <button onClick={() => setScannedList([])} className="text-xs text-red-400">초기화</button>
                                 </div>
                                 <div className="max-h-[400px] overflow-y-auto">
                                     {scannedList.length === 0 ? (
-                                        <p className="p-10 text-center text-slate-500">사진을 올려주세요.</p>
+                                        <div className="p-12 text-center text-slate-500 text-sm">분석된 데이터가 없습니다.</div>
                                     ) : (
                                         scannedList.map((p, i) => (
-                                            <div key={i} className="flex justify-between p-4 border-b border-slate-800/50 items-center">
-                                                <span>{p.name}</span>
-                                                <span className={`text-[10px] px-2 py-1 rounded ${p.role === '미등록' ? 'bg-red-900/30 text-red-400' : 'bg-blue-900/30 text-blue-400'}`}>{p.role}</span>
+                                            <div key={i} className="flex justify-between p-4 border-b border-slate-800/50 items-center animate-fadeIn">
+                                                <span className="text-sm">{p.name}</span>
+                                                <span className={`text-[10px] px-2 py-1 rounded-full ${p.role === '미등록' ? 'bg-red-900/30 text-red-400' : 'bg-blue-900/30 text-blue-400'}`}>
+                                                    {p.role}
+                                                </span>
                                             </div>
                                         ))
                                     )}
@@ -155,12 +175,12 @@
                         </div>
                     ) : (
                         <div className="glass-card rounded-2xl p-4">
-                            <h2 className="font-bold mb-4 text-orange-400">마스터 명단 ({masterList.length}명)</h2>
-                            <div className="max-h-[500px] overflow-y-auto space-y-2">
+                            <h2 className="font-bold text-orange-400 mb-4 border-b border-slate-700 pb-2">마스터 명단 ({masterList.length})</h2>
+                            <div className="max-h-[500px] overflow-y-auto space-y-1">
                                 {masterList.map((m, i) => (
-                                    <div key={i} className="flex justify-between text-sm p-2 bg-slate-800/30 rounded">
-                                        <span>{m.name}</span>
-                                        <span className="text-slate-500">{m.role}</span>
+                                    <div key={i} className="flex justify-between p-2 hover:bg-slate-800/50 rounded transition">
+                                        <span className="text-sm font-medium">{m.name}</span>
+                                        <span className="text-xs text-slate-500">{m.role}</span>
                                     </div>
                                 ))}
                             </div>

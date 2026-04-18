@@ -3,15 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WOS Tracker Pro - V3.0</title>
+    <title>WOS Tracker Pro - V3.8 Success Path</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Noto Sans KR', sans-serif; background: #0f172a; color: #f1f5f9; }
+        body { font-family: 'Noto Sans KR', sans-serif; background: #0f172a; color: #f1f5f9; margin: 0; padding: 0; }
         .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -29,9 +31,13 @@
             const [masterList, setMasterList] = useState([]);
             const [scannedList, setScannedList] = useState([]);
             const [loading, setLoading] = useState(false);
+            const [statusMsg, setStatusMsg] = useState("");
 
             useEffect(() => {
-                fetch(CONFIG.GAS_URL).then(r => r.json()).then(d => setMasterList(d)).catch(e => console.error("명단 로드 실패"));
+                fetch(CONFIG.GAS_URL)
+                    .then(r => r.json())
+                    .then(d => setMasterList(d))
+                    .catch(e => console.error("명단 로드 실패"));
             }, []);
 
             const runAI = async (e) => {
@@ -39,110 +45,101 @@
                 if (!files.length) return;
 
                 setLoading(true);
-                let rawNames = [];
+                setStatusMsg("분석 시작...");
+                
+                let allExtractedNames = [];
 
                 try {
-                    for (const file of files) {
-                        const reader = new FileReader();
-                        const base64 = await new Promise(r => {
-                            reader.onload = () => r(reader.result.split(',')[1]);
+                    for (let file of files) {
+                        const base64Data = await new Promise(resolve => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result.split(',')[1]);
                             reader.readAsDataURL(file);
                         });
 
-                        // ★ [핵심 해결] 구글 최신 2.5 flash 모델로 전면 교체! (더 이상 404 에러가 나지 않습니다)
+                        // ★ [성공 공식 적용] gemini-2.5-flash 모델로 404 에러 원천 봉쇄
                         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${CONFIG.API_KEY}`;
-                        console.log("🔥 [V3.0] 연결 시도 주소:", API_URL);
-
+                        
                         const response = await fetch(API_URL, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                                 contents: [{
                                     parts: [
-                                        { text: "이 사진에서 [GOM] 태그가 붙은 유저들의 닉네임만 뽑아서 JSON으로 줘. 예: {\"names\":[\"닉네임1\"]}" },
-                                        { inline_data: { mime_type: file.type, data: base64 } }
+                                        { text: "Find nicknames behind [GOM] and return as JSON: {\"names\": []}" },
+                                        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
                                     ]
                                 }]
                             })
                         });
 
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            console.error("🚨 구글 서버 상세 에러 메시지:", errorText);
-                            throw new Error(`상태코드 ${response.status}: 모델 접근 실패. 콘솔(F12)을 확인해주세요.`);
-                        }
-                        
                         const resData = await response.json();
-                        const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                        const match = text.match(/\{.*\}/s);
-                        if (match) {
-                            const parsed = JSON.parse(match[0]);
-                            if (parsed.names) rawNames = [...rawNames, ...parsed.names];
+                        if (resData.error) throw new Error(resData.error.message);
+
+                        const aiText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                        const jsonMatch = aiText.match(/\{.*\}/s);
+                        if (jsonMatch) {
+                            const parsed = JSON.parse(jsonMatch[0]);
+                            if (parsed.names) allExtractedNames = [...allExtractedNames, ...parsed.names];
                         }
                     }
 
-                    const processed = [...new Set(rawNames)].map(name => {
-                        const clean = name.trim();
-                        const found = masterList.find(m => clean.includes(m.name) || m.name.includes(clean));
-                        return found ? { ...found } : { name: clean, role: "미등록" };
+                    // 마스터 대조 및 누적 로직
+                    const processedData = allExtractedNames.map(name => {
+                        const cleanName = name.trim();
+                        const match = masterList.find(m => cleanName.includes(m.name) || m.name.includes(cleanName));
+                        return match ? { ...match } : { name: cleanName, role: "미등록" };
                     });
 
-                    setScannedList(processed);
-                    alert(`${processed.length}명을 성공적으로 읽었습니다!`);
+                    setScannedList(prev => {
+                        const combined = [...prev, ...processedData];
+                        return combined.filter((item, index, self) =>
+                            index === self.findIndex((t) => t.name === item.name)
+                        );
+                    });
 
+                    setStatusMsg("완료!");
                 } catch (err) {
-                    console.error("에러 상세:", err);
-                    alert(`분석 오류 발생!\n${err.message}`);
+                    alert("에러: " + err.message);
+                    setStatusMsg("오류");
                 } finally {
                     setLoading(false);
+                    setTimeout(() => setStatusMsg(""), 3000);
                 }
             };
 
             return (
                 <div className="max-w-md mx-auto min-h-screen p-4 flex flex-col">
-                    <header className="py-6 text-center">
-                        <h1 className="text-2xl font-bold text-blue-400 tracking-tight">WOS TRACKER PRO</h1>
-                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-widest">Version 3.0 - Gemini 2.5 Engine</p>
+                    <header className="py-8 text-center">
+                        <h1 className="text-3xl font-bold text-blue-400 tracking-tighter" style={{fontFamily: 'Orbitron'}}>WOS TRACKER PRO</h1>
+                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-[0.2em] mt-1">Version 3.8 - 2.5 Engine Verified</p>
                     </header>
 
-                    <main className="flex-1 space-y-4">
-                        <div className="glass p-10 rounded-3xl text-center relative border-2 border-dashed border-slate-700 hover:border-blue-500 transition-all group">
+                    <main className="flex-1 space-y-6">
+                        <div className="glass p-10 rounded-[2rem] text-center relative border-2 border-dashed border-slate-700 hover:border-blue-500 transition-all group">
                             <input type="file" multiple onChange={runAI} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                            <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📸</div>
-                            <p className="text-sm font-bold text-slate-300">집결 스크린샷 업로드</p>
+                            <div className="text-5xl mb-3 group-hover:scale-110 transition-transform">📸</div>
+                            <p className="text-sm font-bold text-slate-300">스크린샷 업로드 (누적 가능)</p>
                         </div>
 
-                        {loading && (
-                            <div className="text-center py-4 animate-pulse">
-                                <p className="text-blue-400 text-xs font-bold">최신 AI가 명단을 분석하는 중...</p>
-                            </div>
-                        )}
+                        {loading && <div className="text-center text-blue-400 text-xs animate-pulse font-bold">{statusMsg}</div>}
 
-                        <div className="glass rounded-2xl overflow-hidden shadow-2xl">
-                            <div className="p-4 bg-slate-800/50 flex justify-between border-b border-white/5">
-                                <span className="text-xs font-bold text-slate-400 uppercase">분석 결과 ({scannedList.length})</span>
-                                <button onClick={() => setScannedList([])} className="text-[10px] text-red-500 font-bold">초기화</button>
+                        <div className="glass rounded-[1.5rem] overflow-hidden">
+                            <div className="p-4 bg-slate-800/80 flex justify-between items-center border-b border-white/5">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">결과 ({scannedList.length}명)</span>
+                                <button onClick={() => setScannedList([])} className="text-[10px] text-red-500 font-bold">전체 삭제</button>
                             </div>
-                            <div className="max-h-[400px] overflow-y-auto">
-                                {scannedList.length === 0 ? (
-                                    <p className="p-16 text-center text-slate-600 text-xs italic font-light">데이터가 없습니다.</p>
-                                ) : (
-                                    scannedList.map((p, i) => (
-                                        <div key={i} className="flex justify-between p-4 border-b border-white/5 items-center">
-                                            <span className="text-sm">{p.name}</span>
-                                            <span className={`text-[9px] px-2 py-0.5 rounded border ${p.role === '미등록' ? 'text-red-400 border-red-400/30' : 'text-blue-400 border-blue-400/30'}`}>
-                                                {p.role}
-                                            </span>
-                                        </div>
-                                    ))
-                                )}
+                            <div className="max-h-[400px] overflow-y-auto custom-scroll">
+                                {scannedList.map((p, i) => (
+                                    <div key={i} className="flex justify-between p-4 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
+                                        <span className="text-sm font-medium">{p.name}</span>
+                                        <span className={`text-[9px] font-bold px-2 py-1 rounded-full border ${p.role === '미등록' ? 'border-red-500/50 text-red-400' : 'border-blue-500/50 text-blue-400'}`}>{p.role}</span>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </main>
-
-                    <footer className="py-4 text-center text-[9px] text-slate-600 uppercase tracking-widest">
-                        Powered by Google Gemini 2.5 Flash
-                    </footer>
+                    <footer className="py-6 text-center text-[10px] text-slate-600 uppercase tracking-widest font-bold">WOS Fortress System</footer>
                 </div>
             );
         }

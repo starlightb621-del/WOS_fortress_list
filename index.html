@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WOS Fortress Tracker Pro</title>
+    <title>WOS Tracker Pro - Final</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -34,89 +34,76 @@
             const [loadingMsg, setLoadingMsg] = useState("");
             const [view, setView] = useState('main');
 
-            const fetchMaster = () => {
-                setLoadingMsg("마스터 명단 동기화 중...");
+            useEffect(() => {
                 fetch(CONFIG.GAS_URL)
                     .then(res => res.json())
-                    .then(data => {
-                        setMasterList(Array.isArray(data) ? data : []);
-                        setLoadingMsg("");
-                    })
-                    .catch(err => setLoadingMsg("명단 로드 실패"));
-            };
-
-            useEffect(() => { fetchMaster(); }, []);
+                    .then(data => setMasterList(Array.isArray(data) ? data : []))
+                    .catch(e => console.error("명단 로드 실패"));
+            }, []);
 
             const handleFileUpload = async (e) => {
                 const files = Array.from(e.target.files);
                 if (files.length === 0) return;
 
                 setLoading(true);
-                let allExtractedNames = [];
+                let allNames = [];
                 
                 try {
-                    for (let i = 0; i < files.length; i++) {
-                        setLoadingMsg(`${i + 1}번 이미지 분석 중...`);
+                    for (const file of files) {
+                        setLoadingMsg("AI 서버로 사진 배달 중...");
                         const reader = new FileReader();
-                        const base64Promise = new Promise(resolve => {
+                        const base64 = await new Promise(resolve => {
                             reader.onload = () => resolve(reader.result.split(',')[1]);
-                            reader.readAsDataURL(files[i]);
+                            reader.readAsDataURL(file);
                         });
-                        const base64Image = await base64Promise;
 
-                        // 특수문자가 섞인 WOS 닉네임에 최적화된 프롬프트
-                        const promptText = `이 이미지는 게임 '화이트아웃 서바이벌'의 연맹원 목록이야.
-                        각 유저의 닉네임을 추출해줘.
-                        주의사항:
-                        1. [GOM] 같은 대괄호 안의 연맹 태그는 제외해.
-                        2. 태그 바로 뒤에 나오는 닉네임을 정확히 추출해. 
-                        3. 닉네임 뒤에 붙은 복잡한 그림 이모티콘이나 특수문자는 최대한 빼고 텍스트 위주로 추출해.
-                        4. 결과는 반드시 JSON 형식으로만 답해줘: {"names": ["닉네임1", "닉네임2"]}`;
+                        // 404 에러 방지를 위한 최신 API 호출 주소 구조
+                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${CONFIG.GEMINI_API_KEY}`;
 
-                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${CONFIG.GEMINI_API_KEY}`, {
+                        const response = await fetch(apiUrl, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                                 contents: [{
                                     parts: [
-                                        { text: promptText },
-                                        { inline_data: { mime_type: "image/jpeg", data: base64Image } }
+                                        { text: "이 이미지는 '화이트아웃 서바이벌' 연맹 화면이야. [GOM] 태그 뒤에 있는 닉네임들만 찾아서 JSON으로 줘. 형식: {\"names\": [\"이름1\", \"이름2\"]}" },
+                                        { inline_data: { mime_type: "image/jpeg", data: base64 } }
                                     ]
                                 }]
                             })
                         });
 
+                        if (!response.ok) throw new Error(`서버 응답 오류: ${response.status}`);
+
                         const result = await response.json();
-                        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+                        const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                        const jsonMatch = text.match(/\{[\s\S]*\}/);
                         
                         if (jsonMatch) {
                             const parsed = JSON.parse(jsonMatch[0]);
-                            if (parsed.names) allExtractedNames = [...allExtractedNames, ...parsed.names];
+                            if (parsed.names) allNames = [...allNames, ...parsed.names];
                         }
                     }
 
-                    // 매칭 로직
-                    const results = allExtractedNames.map(name => {
-                        const cleanName = name.trim();
-                        // 마스터 명단에 포함되어 있는지 확인 (부분 일치 허용으로 특수문자 대응)
-                        const info = masterList.find(m => cleanName.includes(m.name.trim()) || m.name.trim().includes(cleanName));
-                        return info ? { ...info } : { name: cleanName, role: "미등록", grade: "-" };
+                    const finalResults = allNames.map(name => {
+                        const clean = name.trim();
+                        const match = masterList.find(m => clean.includes(m.name.trim()) || m.name.trim().includes(clean));
+                        return match ? { ...match } : { name: clean, role: "미등록" };
                     });
 
-                    setScannedList(results);
+                    setScannedList(finalResults);
                     
-                    // GAS 저장 요청 (저장 기능이 필요 없다면 생략 가능)
+                    // GAS 저장 (No-Cors 모드)
                     fetch(CONFIG.GAS_URL, {
                         method: "POST",
                         mode: "no-cors",
-                        body: JSON.stringify({ action: "saveLog", data: results })
+                        body: JSON.stringify({ action: "saveLog", data: finalResults })
                     });
 
-                    alert(`${results.length}명의 데이터를 읽었습니다!`);
+                    alert(`${finalResults.length}명을 찾았습니다!`);
                 } catch (error) {
-                    console.error(error);
-                    alert("분석 중 오류가 발생했습니다.");
+                    console.error(m);
+                    alert("AI 연결에 실패했습니다. 주소나 키를 확인해주세요.");
                 } finally {
                     setLoading(false);
                     setLoadingMsg("");
@@ -133,44 +120,45 @@
                     </header>
 
                     {loading && (
-                        <div className="fixed inset-0 bg-black/80 flex flex-col items-center justify-center z-50">
+                        <div className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-50">
                             <div className="loading-spinner mb-4"></div>
-                            <p>{loadingMsg}</p>
+                            <p className="text-blue-400 font-bold">{loadingMsg}</p>
                         </div>
                     )}
 
                     {view === 'main' ? (
                         <div className="space-y-4">
-                            <div className="glass-card p-10 text-center rounded-3xl border-2 border-dashed border-slate-600 relative">
+                            <div className="glass-card p-12 text-center rounded-3xl border-2 border-dashed border-slate-600 relative">
                                 <input type="file" multiple onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" />
-                                <div className="text-4xl mb-2">📸</div>
+                                <p className="text-4xl mb-3">📸</p>
                                 <p className="font-bold">스크린샷 업로드</p>
-                                <p className="text-xs text-slate-400 mt-1">집결 화면 스크린샷을 선택하세요</p>
                             </div>
                             
                             <div className="glass-card rounded-2xl overflow-hidden">
-                                <div className="p-4 bg-slate-800/50 flex justify-between">
+                                <div className="p-4 bg-slate-800/50 flex justify-between border-b border-slate-700">
                                     <span className="font-bold">스캔 결과 ({scannedList.length})</span>
-                                    <button onClick={() => setScannedList([])} className="text-xs text-slate-400">초기화</button>
+                                    <button onClick={() => setScannedList([])} className="text-xs text-red-400">지우기</button>
                                 </div>
-                                <div className="max-h-[400px] overflow-y-auto divide-y divide-slate-700">
-                                    {scannedList.map((p, i) => (
-                                        <div key={i} className="flex justify-between p-4 items-center">
-                                            <span className="text-sm font-medium">{p.name}</span>
-                                            <span className={`text-[10px] px-2 py-0.5 rounded ${p.role === '미등록' ? 'bg-red-900/30 text-red-400' : 'bg-blue-900/30 text-blue-400'}`}>
-                                                {p.role}
-                                            </span>
-                                        </div>
-                                    ))}
+                                <div className="max-h-[400px] overflow-y-auto">
+                                    {scannedList.length === 0 ? (
+                                        <p className="p-10 text-center text-slate-500">사진을 올려주세요.</p>
+                                    ) : (
+                                        scannedList.map((p, i) => (
+                                            <div key={i} className="flex justify-between p-4 border-b border-slate-800/50 items-center">
+                                                <span>{p.name}</span>
+                                                <span className={`text-[10px] px-2 py-1 rounded ${p.role === '미등록' ? 'bg-red-900/30 text-red-400' : 'bg-blue-900/30 text-blue-400'}`}>{p.role}</span>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="glass-card rounded-2xl overflow-hidden">
-                            <div className="p-4 bg-slate-800/50 font-bold text-orange-400">등록된 마스터 명단</div>
-                            <div className="max-h-[500px] overflow-y-auto divide-y divide-slate-700">
+                        <div className="glass-card rounded-2xl p-4">
+                            <h2 className="font-bold mb-4 text-orange-400">마스터 명단 ({masterList.length}명)</h2>
+                            <div className="max-h-[500px] overflow-y-auto space-y-2">
                                 {masterList.map((m, i) => (
-                                    <div key={i} className="flex justify-between p-3 text-sm">
+                                    <div key={i} className="flex justify-between text-sm p-2 bg-slate-800/30 rounded">
                                         <span>{m.name}</span>
                                         <span className="text-slate-500">{m.role}</span>
                                     </div>

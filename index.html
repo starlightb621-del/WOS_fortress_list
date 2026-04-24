@@ -25,8 +25,8 @@
         
         const CONFIG = {
             GAS_URL: "https://script.google.com/macros/s/AKfycbxcCpXhhu8_ZDW0BaJEtzVkNvJ1K7biHOhdGkba3Eds4h5UDoXEvY9vToE5B_8tezD8/exec",
-            API_KEY: "AIzaSyAgezV6j6tCs-7j39pA32FSVLgHy6rduFI", // 기존 키 유지
-            MODEL_NAME: "gemini-2.5-flash" // 안정적인 추출을 위해 flash 모델 최신 버전 권장
+            API_KEY: "AIzaSyAgezV6j6tCs-7j39pA32FSVLgHy6rduFI", 
+            MODEL_NAME: "gemini-1.5-flash" 
         };
 
         const Icon = ({ name, size = 18, className = "" }) => {
@@ -41,8 +41,8 @@
             const [loading, setLoading] = useState(false);
             const [statusMsg, setStatusMsg] = useState("");
             const [isSyncing, setIsSyncing] = useState(false);
-            const [newName, setNewName] = useState(""); // 수동 추가용
-            const [editingIndex, setEditingIndex] = useState(null); // 수정 모드 확인용
+            const [newName, setNewName] = useState(""); 
+            const [editingIndex, setEditingIndex] = useState(null); 
             const fileInputRef = useRef(null);
 
             useEffect(() => { 
@@ -71,50 +71,59 @@
                 finally { setIsSyncing(false); setTimeout(() => setStatusMsg(""), 2000); }
             };
 
+            // [추가] 문자열 정제 함수: [GOM] 태그 및 특수문자 제거
+            const normalize = (text) => {
+                if (!text) return "";
+                return text.replace(/\[.*?\]/g, '') // [GOM] 등 대괄호 태그 제거
+                           .replace(/[^가-힣a-zA-Z0-9]/g, '') // 한글, 영문, 숫자 외 제거
+                           .trim();
+            };
+
             const getSimilarity = (s1, s2) => {
-                if (!s1 || !s2) return 0;
-                const len1 = s1.length, len2 = s2.length;
+                const str1 = normalize(s1);
+                const str2 = normalize(s2);
+                if (!str1 || !str2) return 0;
+                
+                const len1 = str1.length, len2 = str2.length;
                 const matrix = Array(len1 + 1).fill(null).map(() => Array(len2 + 1).fill(null));
                 for (let i = 0; i <= len1; i++) matrix[i][0] = i;
                 for (let j = 0; j <= len2; j++) matrix[0][j] = j;
                 for (let i = 1; i <= len1; i++) {
                     for (let j = 1; j <= len2; j++) {
-                        const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
                         matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
                     }
                 }
                 return 1 - matrix[len1][len2] / Math.max(len1, len2);
             };
 
-            // 수동 추가 함수
+            // 보정 로직 통합 함수
+            const getBestMatchedUser = (rawName) => {
+                let best = { name: rawName.trim(), role: "본캐", score: 0 };
+                masterList.forEach(m => {
+                    const s = getSimilarity(rawName, m.name);
+                    // 50% 이상 유사하면 마스터 명단의 정식 이름으로 매칭
+                    if (s > best.score && s > 0.5) {
+                        best = { ...m, score: s };
+                    }
+                });
+                return best;
+            };
+
             const handleAddName = () => {
                 if (!newName.trim()) return;
-                
-                let best = { name: newName.trim(), role: "본캐", score: 0 };
-                masterList.forEach(m => {
-                    const s = getSimilarity(newName.trim(), m.name);
-                    if (s > 0.8) best = { ...m, score: s };
-                });
-
+                const best = getBestMatchedUser(newName);
                 const updatedList = [...scannedData[activeTime], best];
                 const unique = updatedList.filter((v, i, a) => a.findIndex(t => t.name === v.name) === i);
                 const next = { ...scannedData, [activeTime]: unique };
-                
                 setScannedData(next);
                 syncToSheet(next);
                 setNewName("");
             };
 
-            // 이름 수정 완료 함수
             const handleEditComplete = (index, val) => {
                 const updatedList = [...scannedData[activeTime]];
-                let best = { name: val.trim(), role: "본캐" };
-                masterList.forEach(m => {
-                    const s = getSimilarity(val.trim(), m.name);
-                    if (s > 0.8) best = { ...m };
-                });
-                
-                updatedList[index] = best;
+                updatedList[index] = getBestMatchedUser(val);
                 const next = { ...scannedData, [activeTime]: updatedList };
                 setScannedData(next);
                 syncToSheet(next);
@@ -124,7 +133,7 @@
             const runAI = async (e) => {
                 const files = Array.from(e.target.files);
                 if (!files.length) return;
-                setLoading(true); setStatusMsg("AI 분석 중...");
+                setLoading(true); setStatusMsg("AI 분석 및 보정 중...");
                 
                 let allExtractedNames = [];
                 try {
@@ -138,7 +147,7 @@
                         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.MODEL_NAME}:generateContent?key=${CONFIG.API_KEY}`, {
                             method: "POST", headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ contents: [{ parts: [
-                                { text: "이 이미지에서 게임 캐릭터 닉네임만 모두 추출해줘. 불필요한 기호나 길드명은 제외하고 순수 닉네임만 JSON 배열로 만들어: {\"names\": [\"닉네임1\", \"닉네임2\"]}" },
+                                { text: "이 이미지에서 연맹 전쟁(Rally)에 참여한 캐릭터 닉네임들을 정확히 추출해줘. [GOM]과 같은 연맹태그나 '도착 완료' 같은 상태 메시지는 제외하고 캐릭터 이름만 추출해서 JSON 배열로 만들어줘: {\"names\": [\"이름1\", \"이름2\"]}" },
                                 { inlineData: { mimeType: "image/jpeg", data: base64Data } }
                             ]}]})
                         });
@@ -151,23 +160,18 @@
                         }
                     }
 
-                    const processed = allExtractedNames.map(raw => {
-                        let best = { name: raw.trim(), role: "본캐", score: 0 };
-                        masterList.forEach(m => {
-                            const s = getSimilarity(raw.trim(), m.name);
-                            if (s > best.score && s > 0.6) best = { ...m, score: s };
-                        });
-                        return best;
-                    });
+                    // 마스터 명단과 대조하여 보정
+                    const processed = allExtractedNames.map(raw => getBestMatchedUser(raw));
 
                     setScannedData(prev => {
                         const combined = [...prev[activeTime], ...processed];
+                        // 이름 기준으로 중복 제거
                         const unique = combined.filter((v, i, a) => a.findIndex(t => t.name === v.name) === i);
                         const next = { ...prev, [activeTime]: unique };
                         syncToSheet(next);
                         return next;
                     });
-                } catch (err) { setStatusMsg("오류 발생"); }
+                } catch (err) { setStatusMsg("분석 오류 발생"); }
                 finally { setLoading(false); }
             };
 
@@ -184,7 +188,7 @@
                     <div className="min-h-screen bg-white p-6">
                         <header className="flex items-center justify-between mb-8">
                             <button onClick={() => setView('main')} className="p-2 text-slate-500"><Icon name="chevron-left" size={24}/></button>
-                            <h2 className="text-xl font-black">마스터 명단</h2>
+                            <h2 className="text-xl font-black">마스터 명단 ({masterList.length}명)</h2>
                             <div className="w-10"></div>
                         </header>
                         <div className="space-y-2">
@@ -240,7 +244,7 @@
                             </div>
                             <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-blue-100 rounded-2xl p-4 flex flex-col items-center cursor-pointer hover:bg-blue-50 transition-colors">
                                 <input type="file" ref={fileInputRef} multiple onChange={runAI} className="hidden" />
-                                {loading ? <Icon name="refresh-cw" className="animate-spin text-blue-500" /> : <div className="flex items-center gap-2 text-blue-500 font-black text-sm"><Icon name="camera" size={16} /> 스크린샷 스캔하기</div>}
+                                {loading ? <Icon name="refresh-cw" className="animate-spin text-blue-500" /> : <div className="flex items-center gap-2 text-blue-500 font-black text-sm"><Icon name="camera" size={16} /> 스크린샷 스캔 (자동보정)</div>}
                             </div>
                         </div>
 

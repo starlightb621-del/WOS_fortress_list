@@ -3,9 +3,11 @@ import re
 import json
 import difflib
 import redis
+import asyncio
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 CORS(app)
@@ -15,12 +17,12 @@ REDIS_URL = os.getenv('REDIS_URL')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
+executor = ThreadPoolExecutor(max_workers=10) # 병렬 처리를 위한 일꾼들
 
 try:
     r = redis.from_url(REDIS_URL, decode_responses=True)
 except Exception as e:
-    print(f"Redis Connection Error: {e}")
     r = None
 
 def get_master_data():
@@ -43,37 +45,42 @@ def normalize_name(text):
     clean = re.sub(r'[^가-힣a-zA-Z0-9]', '', text.lower())
     return clean
 
+# Gemini에게 분석을 요청하는 단일 작업
+def ask_gemini(img_data):
+    try:
+        prompt = "이미지에서 게임 캐릭터 닉네임만 추출해줘. [길드명] 제외. 결과는 콤마(,)로만 구분해."
+        response = model.generate_content([
+            prompt,
+            {'mime_type': 'image/jpeg', 'data': img_data}
+        ])
+        return [n.strip() for n in re.split(r'[,\n]', response.text) if n.strip()]
+    except:
+        return []
+
 @app.route('/api/check', methods=['POST'])
 def check_attendance():
     try:
         data = request.json
-        # 여러 장의 이미지를 받기 위해 리스트로 가져옵니다.
-        images_b64 = data.get('images', []) # 'image'가 아니라 'images' 리스트
+        images_b64 = data.get('images', [])
         
-        # 만약 기존 방식(단일 이미지)으로 들어왔을 경우를 대비한 방어 코드
         if not images_b64 and data.get('image'):
             images_b64 = [data.get('image')]
 
         if not images_b64:
-            return jsonify({"error": "업로드된 이미지가 없습니다."}), 400
+            return jsonify({"error": "이미지가 없습니다."}), 400
 
+        # 2. 병렬로 Gemini 분석 실행 (속도 향상의 핵심!)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 여러 명의 요리사(Thread)에게 동시에 사진을 맡깁니다.
+        results = list(executor.map(ask_gemini, images_b64))
+        
         all_extracted_names = []
+        for res in results:
+            all_extracted_names.extend(res)
 
-        # 2. 모든 이미지에 대해 순차적으로 Gemini AI 분석
-        for idx, img_data in enumerate(images_b64):
-            try:
-                prompt = "이 이미지에서 게임 캐릭터 닉네임만 추출해줘. [길드명] 제외. 결과는 콤마(,)로만 구분."
-                response = model.generate_content([
-                    prompt,
-                    {'mime_type': 'image/jpeg', 'data': img_data}
-                ])
-                names = [n.strip() for n in re.split(r'[,\n]', response.text) if n.strip()]
-                all_extracted_names.extend(names)
-            except Exception as e:
-                print(f"이미지 {idx} 분석 중 오류: {e}")
-                continue
-
-        # 3. 마스터 데이터 로드 및 비교
+        # 3. 명단 대조 및 보정
         master_list = get_master_data()
         final_results = []
 
@@ -98,11 +105,9 @@ def check_attendance():
                     "score": round(highest_score, 2)
                 })
             else:
-                final_results.append({
-                    "name": raw, "role": "미등록", "score": 0
-                })
+                final_results.append({"name": raw, "role": "미등록", "score": 0})
 
-        # 4. 중복 제거 (여러 장에서 동일 인물이 찍혔을 경우 대비)
+        # 4. 중복 제거
         seen = set()
         unique_members = []
         for res in final_results:
@@ -110,10 +115,7 @@ def check_attendance():
                 unique_members.append(res)
                 seen.add(res['name'])
 
-        return jsonify({
-            "members": unique_members,
-            "count": len(unique_members)
-        })
+        return jsonify({"members": unique_members, "count": len(unique_members)})
 
     except Exception as e:
         return jsonify({"error": str(e), "members": [], "count": 0}), 500

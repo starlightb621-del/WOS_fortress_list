@@ -12,47 +12,45 @@ from concurrent.futures import ThreadPoolExecutor
 app = Flask(__name__)
 CORS(app)
 
-# 1. 환경 변수 설정
+# 환경 변수 및 AI 설정
 REDIS_URL = os.getenv('REDIS_URL')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
-executor = ThreadPoolExecutor(max_workers=10) # 병렬 처리를 위한 일꾼들
+executor = ThreadPoolExecutor(max_workers=10)
 
 try:
     r = redis.from_url(REDIS_URL, decode_responses=True)
-except Exception as e:
+except:
     r = None
 
 def get_master_data():
+    """Redis에서 코랩이 저장한 명단 데이터를 가져옴"""
     try:
         if r:
             data = r.get('master_list')
             if data:
                 parsed = json.loads(data)
+                # 코랩 데이터 구조 지원: {'members': {'닉네임': {...}}}
                 if isinstance(parsed, dict) and 'members' in parsed:
                     member_dict = parsed['members']
                     return [{"name": k, "rank": v.get("rank"), "type": v.get("type")} for k, v in member_dict.items()]
                 return parsed
         return []
-    except Exception as e:
+    except:
         return []
 
 def normalize_name(text):
+    """이름 보정: 괄호 제거 및 특수문자 제거"""
     if not text: return ""
     text = re.sub(r'\(.*\)', '', text)
-    clean = re.sub(r'[^가-힣a-zA-Z0-9]', '', text.lower())
-    return clean
+    return re.sub(r'[^가-힣a-zA-Z0-9]', '', text.lower())
 
-# Gemini에게 분석을 요청하는 단일 작업
 def ask_gemini(img_data):
+    """Gemini에게 개별 이미지 분석 요청"""
     try:
-        prompt = "이미지에서 게임 캐릭터 닉네임만 추출해줘. [길드명] 제외. 결과는 콤마(,)로만 구분해."
-        response = model.generate_content([
-            prompt,
-            {'mime_type': 'image/jpeg', 'data': img_data}
-        ])
+        prompt = "이 이미지에서 캐릭터 닉네임만 추출해서 콤마(,)로 구분해줘. [길드명]은 제외해."
+        response = model.generate_content([prompt, {'mime_type': 'image/jpeg', 'data': img_data}])
         return [n.strip() for n in re.split(r'[,\n]', response.text) if n.strip()]
     except:
         return []
@@ -63,24 +61,11 @@ def check_attendance():
         data = request.json
         images_b64 = data.get('images', [])
         
-        if not images_b64 and data.get('image'):
-            images_b64 = [data.get('image')]
-
-        if not images_b64:
-            return jsonify({"error": "이미지가 없습니다."}), 400
-
-        # 2. 병렬로 Gemini 분석 실행 (속도 향상의 핵심!)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # 여러 명의 요리사(Thread)에게 동시에 사진을 맡깁니다.
+        # 1. 병렬 처리로 모든 이미지 분석
         results = list(executor.map(ask_gemini, images_b64))
-        
-        all_extracted_names = []
-        for res in results:
-            all_extracted_names.extend(res)
+        all_extracted_names = [name for res in results for name in res]
 
-        # 3. 명단 대조 및 보정
+        # 2. 마스터 명단 대조
         master_list = get_master_data()
         final_results = []
 
@@ -95,9 +80,9 @@ def check_attendance():
                 clean_master = normalize_name(master['name'])
                 score = difflib.SequenceMatcher(None, clean_raw, clean_master).ratio()
                 if score > highest_score:
-                    highest_score = score
-                    best_match = master
+                    highest_score, best_match = score, master
             
+            # 유사도 40% 이상이면 매칭 성공으로 간주
             if best_match and highest_score > 0.4:
                 final_results.append({
                     "name": best_match['name'],
@@ -107,16 +92,14 @@ def check_attendance():
             else:
                 final_results.append({"name": raw, "role": "미등록", "score": 0})
 
-        # 4. 중복 제거
+        # 3. 중복 제거
         seen = set()
         unique_members = []
         for res in final_results:
             if res['name'] not in seen:
-                unique_members.append(res)
-                seen.add(res['name'])
+                unique_members.append(res); seen.add(res['name'])
 
         return jsonify({"members": unique_members, "count": len(unique_members)})
-
     except Exception as e:
         return jsonify({"error": str(e), "members": [], "count": 0}), 500
 

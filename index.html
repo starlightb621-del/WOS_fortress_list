@@ -49,27 +49,23 @@
 </head>
 <body class="min-h-screen flex flex-col items-center p-4 md:p-8">
 
-    <!-- Header Status -->
     <div class="flex items-center space-x-2 bg-blue-50 px-4 py-1.5 rounded-full mb-6 border border-blue-100 shadow-sm">
         <div class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
         <span class="text-blue-600 text-xs font-bold uppercase tracking-wider">Cloud Connected</span>
     </div>
 
-    <!-- Title -->
     <h1 class="text-4xl font-black text-gray-900 mb-8 tracking-tight">
         WOS 요새쟁탈 <span class="text-blue-600">명단 PRO</span>
     </h1>
 
     <div class="w-full max-w-lg space-y-6">
         
-        <!-- Time Tabs -->
         <div class="card p-2 flex space-x-1">
             <button onclick="setTab('12시')" id="tab-12시" class="flex-1 py-3 rounded-2xl text-sm font-bold transition-all tab-active">12시</button>
             <button onclick="setTab('18시')" id="tab-18시" class="flex-1 py-3 rounded-2xl text-sm font-bold text-gray-400 hover:bg-gray-100 transition-all">18시</button>
             <button onclick="setTab('21시')" id="tab-21시" class="flex-1 py-3 rounded-2xl text-sm font-bold text-gray-400 hover:bg-gray-100 transition-all">21시</button>
         </div>
 
-        <!-- Input Section -->
         <div class="card p-6 space-y-4">
             <div class="flex space-x-2">
                 <input type="text" id="manualInput" 
@@ -87,7 +83,6 @@
             </label>
         </div>
 
-        <!-- List Section -->
         <div class="card flex flex-col overflow-hidden min-h-[400px]">
             <div class="p-6 border-b border-gray-50 flex justify-between items-center">
                 <h2 class="font-bold text-gray-700 text-sm">참여 명단 (<span id="memberCount">0</span>명)</h2>
@@ -97,7 +92,6 @@
             </div>
 
             <div id="memberList" class="flex-1 overflow-y-auto max-h-[350px] p-6 member-list">
-                <!-- Empty State -->
                 <div id="emptyState" class="h-full flex flex-col items-center justify-center py-10 opacity-40">
                     <div class="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
                         <i class="fa-solid fa-shield-check text-2xl text-gray-400"></i>
@@ -113,7 +107,7 @@
                 </button>
                 
                 <div class="mt-4 flex justify-center">
-                    <button onclick="openMasterList()" class="text-xs text-gray-400 font-medium hover:text-blue-500 flex items-center space-x-1">
+                    <button onclick="window.location.href='/master'" class="text-xs text-gray-400 font-medium hover:text-blue-500 flex items-center space-x-1">
                         <i class="fa-solid fa-gear"></i>
                         <span>마스터 명단 확인</span>
                     </button>
@@ -122,18 +116,13 @@
         </div>
     </div>
 
-    <!-- Notification Toast -->
     <div id="toast" class="fixed bottom-10 bg-gray-900 text-white px-6 py-3 rounded-full text-sm font-bold opacity-0 transition-all pointer-events-none z-50">
         메시지
     </div>
 
     <script>
         let currentTab = '12시';
-        let membersByTime = {
-            '12시': [],
-            '18시': [],
-            '21시': []
-        };
+        let membersByTime = { '12시': [], '18시': [], '21시': [] };
 
         function setTab(time) {
             currentTab = time;
@@ -152,64 +141,36 @@
             const countEl = document.getElementById('memberCount');
             const currentMembers = membersByTime[currentTab];
 
-            // 기존 리스트 초기화 (안전하게 제거)
-            while (listEl.firstChild) {
-                listEl.removeChild(listEl.firstChild);
-            }
-
+            listEl.innerHTML = '';
             countEl.textContent = currentMembers.length;
 
             if (currentMembers.length === 0) {
-                const emptyState = document.createElement('div');
-                emptyState.className = "h-full flex flex-col items-center justify-center py-10 opacity-40";
-                emptyState.innerHTML = `
-                    <div class="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
-                        <i class="fa-solid fa-shield-check text-2xl text-gray-400"></i>
-                    </div>
-                    <p class="text-sm font-medium text-gray-500">데이터가 없습니다</p>
-                `;
-                listEl.appendChild(emptyState);
+                listEl.innerHTML = `
+                    <div class="h-full flex flex-col items-center justify-center py-10 opacity-40">
+                        <div class="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+                            <i class="fa-solid fa-shield-check text-2xl text-gray-400"></i>
+                        </div>
+                        <p class="text-sm font-medium text-gray-500">데이터가 없습니다</p>
+                    </div>`;
                 return;
             }
 
             currentMembers.forEach((m, idx) => {
                 const item = document.createElement('div');
-                item.className = "flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-xl fade-in";
+                item.className = "flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-xl fade-in shadow-sm";
                 item.innerHTML = `
                     <div class="flex items-center space-x-3">
                         <span class="w-6 h-6 flex items-center justify-center bg-white rounded-lg text-[10px] font-bold text-gray-400 border border-gray-100">${idx + 1}</span>
                         <div>
                             <p class="text-sm font-bold text-gray-800">${m.name}</p>
-                            <p class="text-[10px] text-blue-500 font-bold">${m.role}</p>
+                            <p class="text-[10px] text-blue-500 font-bold uppercase tracking-tight">${m.role}</p>
                         </div>
                     </div>
                     <button onclick="removeMember(${idx})" class="text-gray-300 hover:text-red-500 transition px-2">
                         <i class="fa-solid fa-xmark"></i>
-                    </button>
-                `;
+                    </button>`;
                 listEl.appendChild(item);
             });
-        }
-
-        function addManualMember() {
-            const input = document.getElementById('manualInput');
-            const name = input.value.trim();
-            if (!name) return;
-
-            // 중복 체크
-            if (membersByTime[currentTab].some(m => m.name === name)) {
-                showToast("이미 명단에 있는 이름입니다.");
-                return;
-            }
-
-            membersByTime[currentTab].push({
-                name: name,
-                role: "직접추가",
-                score: 1.0
-            });
-
-            input.value = '';
-            renderList();
         }
 
         async function handleOCR(event) {
@@ -218,42 +179,56 @@
 
             const statusText = document.getElementById('ocrStatus');
             const originalText = statusText.textContent;
-            statusText.textContent = "분석 서버 연결 중...";
+            statusText.textContent = "이미지 분석 및 보정 중...";
 
             try {
-                const formData = new FormData();
-                formData.append('image', file);
+                // 이미지를 Base64로 변환
+                const base64Image = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result.split(',')[1]);
+                    reader.readAsDataURL(file);
+                });
 
-                // 주의: Vercel에 배포된 api/index.py 엔드포인트를 호출해야 합니다.
-                // 현재 api/index.py에 이미지를 텍스트로 변환하는 OCR 로직이 구현되어 있어야 합니다.
+                // Vercel API 호출
                 const response = await fetch('/api/check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    // 실제 구현 시에는 이미지를 텍스트로 바꾸는 과정이 필요합니다.
-                    // 우선은 통신 구조를 확인하기 위해 더미 데이터를 요청하거나 에러를 방지합니다.
-                    body: JSON.stringify({ names: ["분석테스트"] }) 
+                    body: JSON.stringify({ image: base64Image })
                 });
-
-                if (!response.ok) throw new Error("서버 응답 오류");
 
                 const data = await response.json();
-                
-                // 결과 반영 (실제 OCR 로직 연결 전까지는 예시 데이터 노출)
-                data.forEach(m => {
-                    if (!membersByTime[currentTab].some(existing => existing.name === m.name)) {
-                        membersByTime[currentTab].push(m);
-                    }
-                });
-                
-                renderList();
-                showToast("분석이 완료되었습니다.");
+                if (data.members) {
+                    data.members.forEach(newMember => {
+                        if (!membersByTime[currentTab].some(m => m.name === newMember.name)) {
+                            membersByTime[currentTab].push(newMember);
+                        }
+                    });
+                    renderList();
+                    showToast(`${data.members.length}명의 연맹원을 확인했습니다.`);
+                }
             } catch (err) {
-                console.error(err);
-                showToast("분석 실패: 서버 설정을 확인해주세요.");
+                showToast("분석 실패: 네트워크 상태를 확인하세요.");
             } finally {
                 statusText.textContent = originalText;
                 event.target.value = '';
             }
+        }
+
+        function addManualMember() {
+            const input = document.getElementById('manualInput');
+            const name = input.value.trim();
+            if (!name) return;
+
+            if (membersByTime[currentTab].some(m => m.name === name)) {
+                showToast("이미 등록된 닉네임입니다.");
+                return;
+            }
+
+            // 직접 추가 시에도 마스터 명단에 있다면 직책을 가져오기 위해 서버 확인 가능
+            // 여기서는 단순 추가로 구현
+            membersByTime[currentTab].push({ name: name, role: "임시등록" });
+            input.value = '';
+            renderList();
         }
 
         function removeMember(idx) {
@@ -262,7 +237,7 @@
         }
 
         function clearList() {
-            if(confirm("현재 시간대의 명단을 모두 삭제하시겠습니까?")) {
+            if(confirm("현재 명단을 초기화할까요?")) {
                 membersByTime[currentTab] = [];
                 renderList();
             }
@@ -271,49 +246,24 @@
         function copyToClipboard() {
             const currentMembers = membersByTime[currentTab];
             if (currentMembers.length === 0) {
-                showToast("복사할 명단이 없습니다.");
+                showToast("복사할 데이터가 없습니다.");
                 return;
             }
 
-            const text = `${currentTab} 요새전 참여 명단\n` + 
-                         currentMembers.map((m, i) => `${i+1}. ${m.name}`).join('\n');
+            // 가이드 7: 순번 이름(직책) 양식
+            let text = `📢 ${currentTab} 요새전 참여 명단 (총 ${currentMembers.length}명)\n\n`;
+            text += currentMembers.map((m, i) => `${i + 1}. ${m.name} (${m.role})`).join('\n');
             
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(() => {
-                    showToast("명단이 복사되었습니다!");
-                });
-            } else {
-                const textArea = document.createElement("textarea");
-                textArea.value = text;
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    showToast("명단이 복사되었습니다!");
-                } catch (err) {
-                    showToast("복사 실패");
-                }
-                document.body.removeChild(textArea);
-            }
+            navigator.clipboard.writeText(text).then(() => showToast("명단이 클립보드에 저장되었습니다!"));
         }
 
         function showToast(msg) {
             const toast = document.getElementById('toast');
             toast.textContent = msg;
             toast.style.opacity = '1';
-            toast.style.pointerEvents = 'auto';
-            
-            setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.pointerEvents = 'none';
-            }, 2500);
+            setTimeout(() => toast.style.opacity = '0', 2000);
         }
 
-        function openMasterList() {
-            showToast("준비 중인 기능입니다.");
-        }
-
-        // 초기화
         window.onload = renderList;
     </script>
 </body>

@@ -15,7 +15,7 @@ REDIS_URL = os.getenv('REDIS_URL')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 try:
     r = redis.from_url(REDIS_URL, decode_responses=True)

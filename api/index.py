@@ -1,87 +1,74 @@
 import os
-import json
-import difflib
 import re
+import difflib
+import json
 from flask import Flask, request, jsonify
+from vercel_kv import kv # Vercel KV 라이브러리 사용 가정
 
 app = Flask(__name__)
 
-# [수정] 파일 경로를 절대 경로로 설정하여 에러 방지
-BASE_DIR = os.path.dirname(os.path.abspath(__name__))
-JSON_PATH = os.path.join(BASE_DIR, 'master_list.json')
-
-def load_master_data():
+# 마스터 명단 로드 (Vercel KV에서 읽어옴)
+def get_master_data():
     try:
-        # 파일이 api 폴더 안에 같이 있는 경우
-        if os.path.exists(JSON_PATH):
-            with open(JSON_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-    except Exception as e:
-        print(f"Error loading JSON: {e}")
+        data = kv.get('master_list')
+        return json.loads(data) if data else []
+    except:
         return []
 
 def normalize_name(text):
     if not text: return ""
-    text = re.sub(r'\[.*?\]|\(.*?\)', '', text)
-    text = re.sub(r'[^가-힣a-zA-Z0-9]', '', text)
-    return text.strip()
+    # 1. 대소문자 통합 및 공백 제거 (가이드 3)
+    text = text.lower().replace(" ", "")
+    # 2. 특수문자 기준 분할 및 실제 이름 영역 추출 (가이드 9)
+    # [GOM]판다곰_X 등의 패턴 대응
+    parts = re.split(r'[^가-힣a-zA-Z0-9]', text)
+    # 3. 'x' 제거 및 단독 글자 제외 (가이드 2)
+    valid_parts = [p for p in parts if p and p != 'x']
+    return valid_parts[0] if valid_parts else text
 
 @app.route('/api/check', methods=['POST'])
 def check_attendance():
     try:
         data = request.json
         raw_input = data.get('names', "")
-        master_data = load_master_data()
+        master_data = get_master_data()
         
-        # 1. 입력 텍스트 분리 및 정규화
-        ocr_names = [n.strip() for n in re.split(r'[,\n\s]', raw_input) if n.strip()]
+        # 입력 텍스트 분리 (콤마, 줄바꿈)
+        input_names = [n.strip() for n in re.split(r'[,\n]', raw_input) if n.strip()]
         
         final_results = []
-        for raw_name in ocr_names:
-            clean_raw = normalize_name(raw_name)
+        for raw in input_names:
+            clean_raw = normalize_name(raw)
             if not clean_raw: continue
             
             best_match = None
-            highest_score = 0
+            highest_score = -1
             
+            # 가이드 1, 6: 마스터 명단 내에서 무조건 가장 유사한 사람 찾기
             for master in master_data:
                 clean_master = normalize_name(master['name'])
                 score = difflib.SequenceMatcher(None, clean_raw, clean_master).ratio()
                 
                 if score > highest_score:
                     highest_score = score
-                    if score >= 0.4:
-                        best_match = {
-                            "name": master['name'], 
-                            "role": master['role'], 
-                            "score": round(score, 2)
-                        }
+                    best_match = master
             
-            if not best_match:
-                best_match = {"name": clean_raw, "role": "신규/미등록", "score": 0}
-            final_results.append(best_match)
+            # 매칭 결과 추가 (가이드 5: 1인 1캐릭)
+            if best_match:
+                final_results.append(best_match)
 
-        # 2. 중복 제거
+        # 중복 제거 및 최종 정렬
         seen = set()
-        unique_results = []
+        unique_members = []
         for res in final_results:
             if res['name'] not in seen:
-                unique_results.append(res)
+                unique_members.append(res)
                 seen.add(res['name'])
 
-        # 3. 미참석자 추출
-        attended_names = {res['name'] for res in unique_results}
-        absent_members = [m for m in master_data if m['name'] not in attended_names]
-
+        # 가이드 7, 8: 순번, 이름, 직책만 포함하여 반환
         return jsonify({
-            "count": len(unique_results),
-            "members": unique_results,
-            "absent_count": len(absent_members),
-            "absent_members": absent_members
+            "members": unique_members,
+            "count": len(unique_members)
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run()

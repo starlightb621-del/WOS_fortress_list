@@ -426,6 +426,11 @@ const App = () => {
             <span className="text-sm font-bold">{statusMsg.text}</span>
           </div>
         )}
+
+        {/* Version Footer */}
+        <div className="mt-8 text-[10px] font-bold text-slate-300">
+          WOS Fortress Tracker PRO v1.4.0
+        </div>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `

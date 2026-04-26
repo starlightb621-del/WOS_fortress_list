@@ -1,107 +1,176 @@
 import os
-import re
 import json
-import difflib
-import redis
-import asyncio
+import re
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
-from concurrent.futures import ThreadPoolExecutor
+import redis
+from difflib import SequenceMatcher
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# 환경 변수 및 AI 설정
-REDIS_URL = os.getenv('REDIS_URL')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
-executor = ThreadPoolExecutor(max_workers=10)
+# --- Configuration ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+REDIS_URL = os.environ.get("REDIS_URL")
+MASTER_LIST_FILE = os.path.join(os.path.dirname(__file__), "master_list.json")
 
-try:
-    r = redis.from_url(REDIS_URL, decode_responses=True)
-except:
-    r = None
+# Initialize Gemini
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-2.5-flash')
+kv = None
+if REDIS_URL:
+    kv = redis.from_url(REDIS_URL, decode_responses=True)
 
-def get_master_data():
-    """Redis에서 코랩이 저장한 명단 데이터를 가져옴"""
+# --- Helper Functions ---
+def normalize_name(name):
+    if not name: return ""
+    # Remove tags like [GOM], (GOM), special chars, emojis
+    cleaned = re.sub(r'\[.*?\]|\(.*?\)|[^가-힣a-zA-Z0-9]', '', name)
+    return cleaned.strip().upper()
+
+def get_similarity(a, b):
+    return SequenceMatcher(None, a, b).ratio()
+
+def get_master_list():
+    if kv:
+        data = kv.get("master_list")
+        if data:
+            return json.loads(data)
+    
+    # Fallback to file
+    if os.path.exists(MASTER_LIST_FILE):
+        with open(MASTER_LIST_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"members": {}, "last_updated": ""}
+
+def save_master_list(data):
+    if kv:
+        kv.set("master_list", json.dumps(data))
+    with open(MASTER_LIST_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# --- Endpoints ---
+
+@app.route('/api/master', methods=['GET'])
+def master_list_get():
+    return jsonify(get_master_list())
+
+@app.route('/api/scan', methods=['POST'])
+def scan_images():
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "Gemini API Key not configured"}), 500
+    
+    data = request.json
+    images_base64 = data.get("images", []) # List of base64 strings
+    
+    if not images_base64:
+        return jsonify({"error": "No images provided"}), 400
+
+    all_extracted_names = []
+    
     try:
-        if r:
-            data = r.get('master_list')
-            if data:
-                parsed = json.loads(data)
-                # 코랩 데이터 구조 지원: {'members': {'닉네임': {...}}}
-                if isinstance(parsed, dict) and 'members' in parsed:
-                    member_dict = parsed['members']
-                    return [{"name": k, "rank": v.get("rank"), "type": v.get("type")} for k, v in member_dict.items()]
-                return parsed
-        return []
-    except:
-        return []
-
-def normalize_name(text):
-    """이름 보정: 괄호 제거 및 특수문자 제거"""
-    if not text: return ""
-    text = re.sub(r'\(.*\)', '', text)
-    return re.sub(r'[^가-힣a-zA-Z0-9]', '', text.lower())
-
-def ask_gemini(img_data):
-    """Gemini에게 개별 이미지 분석 요청"""
-    try:
-        prompt = "이 이미지에서 캐릭터 닉네임만 추출해서 콤마(,)로 구분해줘. [길드명]은 제외해."
-        response = model.generate_content([prompt, {'mime_type': 'image/jpeg', 'data': img_data}])
-        return [n.strip() for n in re.split(r'[,\n]', response.text) if n.strip()]
-    except:
-        return []
-
-@app.route('/api/check', methods=['POST'])
-def check_attendance():
-    try:
-        data = request.json
-        images_b64 = data.get('images', [])
-        
-        # 1. 병렬 처리로 모든 이미지 분석
-        results = list(executor.map(ask_gemini, images_b64))
-        all_extracted_names = [name for res in results for name in res]
-
-        # 2. 마스터 명단 대조
-        master_list = get_master_data()
-        final_results = []
-
-        for raw in all_extracted_names:
-            clean_raw = normalize_name(raw)
-            if not clean_raw: continue
+        for b64 in images_base64:
+            # Prepare parts for Gemini
+            parts = [
+                "이미지에서 화이트아웃 서바이벌(WOS) 게임의 연맹원 닉네임을 모두 추출해줘. "
+                "반드시 JSON 형식으로 {\"names\": [\"닉네임1\", \"닉네임2\"]} 형태로만 반환해."
+            ]
+            parts.append({"mime_type": "image/jpeg", "data": b64})
             
-            best_match = None
-            highest_score = -1
+            response = model.generate_content(parts)
+            text = response.text
             
-            for master in master_list:
-                clean_master = normalize_name(master['name'])
-                score = difflib.SequenceMatcher(None, clean_raw, clean_master).ratio()
-                if score > highest_score:
-                    highest_score, best_match = score, master
-            
-            # 유사도 40% 이상이면 매칭 성공으로 간주
-            if best_match and highest_score > 0.4:
-                final_results.append({
-                    "name": best_match['name'],
-                    "role": f"{best_match.get('type', '멤버')}({best_match.get('rank', '-')})",
-                    "score": round(highest_score, 2)
-                })
-            else:
-                final_results.append({"name": raw, "role": "미등록", "score": 0})
-
-        # 3. 중복 제거
-        seen = set()
-        unique_members = []
-        for res in final_results:
-            if res['name'] not in seen:
-                unique_members.append(res); seen.add(res['name'])
-
-        return jsonify({"members": unique_members, "count": len(unique_members)})
+            # Extract JSON
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                all_extracted_names.extend(parsed.get("names", []))
     except Exception as e:
-        return jsonify({"error": str(e), "members": [], "count": 0}), 500
+        return jsonify({"error": f"Gemini Error: {str(e)}"}), 500
 
-if __name__ == "__main__":
-    app.run()
+    # Process and Match
+    master_data = get_master_list()
+    members = master_data.get("members", {})
+    master_names = list(members.keys())
+    
+    results = []
+    seen = set()
+    
+    for raw_name in all_extracted_names:
+        norm_raw = normalize_name(raw_name)
+        if not norm_raw: continue
+        
+        best_match = None
+        highest_score = 0
+        
+        for m_name in master_names:
+            norm_master = normalize_name(m_name)
+            score = get_similarity(norm_raw, norm_master)
+            
+            # Strong match check
+            if norm_raw == norm_master:
+                score = 1.0
+            elif norm_raw in norm_master or norm_master in norm_raw:
+                score = max(score, 0.8)
+                
+            if score > highest_score:
+                highest_score = score
+                best_match = m_name
+        
+        # Threshold 0.5 as per spec
+        if highest_score >= 0.5:
+            matched_name = best_match
+            if matched_name not in seen:
+                info = members[matched_name]
+                results.append({
+                    "name": matched_name,
+                    "rank": info.get("rank", "R3"),
+                    "type": info.get("type", "본캐")
+                })
+                seen.add(matched_name)
+        else:
+            # Unmatched
+            if raw_name not in seen:
+                results.append({
+                    "name": raw_name,
+                    "rank": "R3",
+                    "type": "미등록"
+                })
+                seen.add(raw_name)
+                
+    # Sort: Type priority (운영진 > 본캐 > 부캐 > 미등록), then Name
+    type_priority = {"운영진": 0, "본캐": 1, "부캐": 2, "미등록": 3}
+    results.sort(key=lambda x: (type_priority.get(x["type"], 4), x["name"]))
+    
+    return jsonify({"results": results})
+
+@app.route('/api/participation', methods=['GET'])
+def participation_get():
+    time_slot = request.args.get("time", "12시")
+    if kv:
+        data = kv.get(f"participation_{time_slot}")
+        if data:
+            return jsonify(json.loads(data))
+    return jsonify([])
+
+@app.route('/api/participation', methods=['POST'])
+def participation_post():
+    data = request.json
+    time_slot = data.get("time")
+    list_data = data.get("list", [])
+    
+    if not time_slot:
+        return jsonify({"error": "Time slot required"}), 400
+        
+    if kv:
+        kv.set(f"participation_{time_slot}", json.dumps(list_data))
+        
+    return jsonify({"success": True})
+
+if __name__ == '__main__':
+    app.run(debug=True)

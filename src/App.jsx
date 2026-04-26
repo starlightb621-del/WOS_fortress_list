@@ -122,6 +122,53 @@ const App = () => {
     }
   };
 
+  const handleSaveMaster = async (updatedList) => {
+    try {
+      const payload = { 
+        members: updatedList, 
+        last_updated: new Date().toISOString() 
+      };
+      const res = await fetch('/api/master', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setMasterData(payload);
+        showStatus("마스터 명단 저장 완료", "success");
+      }
+    } catch (e) {
+      showStatus("저장 중 오류 발생", "error");
+    }
+  };
+
+  const handleUpdateMasterEntry = (oldName, field, value) => {
+    const newMembers = { ...masterData.members };
+    if (field === 'name') {
+      const info = newMembers[oldName];
+      delete newMembers[oldName];
+      newMembers[value] = info;
+    } else {
+      newMembers[oldName] = { ...newMembers[oldName], [field]: value };
+    }
+    setMasterData({ ...masterData, members: newMembers });
+  };
+
+  const handleAddMasterEntry = () => {
+    const newMembers = { 
+      "신규 유저": { rank: "R3", type: "본캐" },
+      ...masterData.members 
+    };
+    setMasterData({ ...masterData, members: newMembers });
+  };
+
+  const handleDeleteMasterEntry = (name) => {
+    if (!window.confirm(`${name}님을 명단에서 삭제하시겠습니까?`)) return;
+    const newMembers = { ...masterData.members };
+    delete newMembers[name];
+    setMasterData({ ...masterData, members: newMembers });
+  };
+
   const handleManualAdd = () => {
     if (!manualName.trim()) return;
     
@@ -257,34 +304,79 @@ const App = () => {
     </div>
   );
 
-  const AdminView = () => (
-    <div className="w-full max-w-2xl mx-auto p-6 animate-in fade-in">
-      <header className="flex items-center justify-between mb-8">
-        <button onClick={() => setView('main')} className="p-2 hover:bg-slate-100 rounded-xl">
-          <ChevronLeft size={24} className="text-slate-500" />
-        </button>
-        <h2 className="text-xl font-black">마스터 명단 관리</h2>
-        <div className="w-10" />
-      </header>
+  const AdminView = () => {
+    const members = Object.entries(masterData.members);
+    
+    return (
+      <div className="w-full max-w-2xl mx-auto p-4 md:p-6 animate-in fade-in slide-in-from-right-4 pb-20">
+        <header className="flex items-center justify-between mb-8">
+          <button onClick={() => setView('main')} className="p-2 hover:bg-white rounded-xl transition-colors bg-white/50 border border-white shadow-sm">
+            <ChevronLeft size={24} className="text-slate-500" />
+          </button>
+          <div className="text-center">
+            <h2 className="text-xl font-black">마스터 명단 관리</h2>
+            <p className="text-[10px] text-slate-400 font-bold mt-0.5">Vercel KV 실시간 연동됨</p>
+          </div>
+          <button 
+            onClick={handleAddMasterEntry}
+            className="p-2 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-100"
+          >
+            <UserPlus size={24} />
+          </button>
+        </header>
 
-      <div className={`${THEME.card} rounded-3xl p-6`}>
-        <div className="flex justify-between items-center mb-6">
-          <span className="text-sm font-bold text-slate-400">등록 인원: {Object.keys(masterData.members).length}명</span>
-          {/* Add more admin controls here if needed */}
-        </div>
-        
-        <div className="space-y-3">
-          {Object.entries(masterData.members).map(([name, info], i) => (
-            <div key={name} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-              <span className="text-[10px] font-bold text-slate-300 w-6">{i + 1}</span>
-              <span className="flex-1 text-sm font-bold">{name}</span>
-              <span className="text-xs text-slate-400">{info.rank} / {info.type}</span>
+        <div className="space-y-3 mb-10">
+          {members.map(([name, info], i) => (
+            <div key={i} className={`${THEME.card} rounded-2xl p-4 flex flex-col md:flex-row gap-3 items-center group`}>
+              <div className="flex items-center gap-3 w-full md:w-auto flex-1">
+                <span className="text-[10px] font-bold text-blue-200 w-6">{i + 1}</span>
+                <input 
+                  type="text" 
+                  value={name}
+                  onChange={(e) => handleUpdateMasterEntry(name, 'name', e.target.value)}
+                  className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none"
+                />
+              </div>
+              
+              <div className="flex gap-2 w-full md:w-auto">
+                <select 
+                  value={info.rank}
+                  onChange={(e) => handleUpdateMasterEntry(name, 'rank', e.target.value)}
+                  className="flex-1 md:flex-none bg-slate-50 border-none rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                >
+                  {["R5", "R4", "R3", "R2", "R1"].map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <select 
+                  value={info.type}
+                  onChange={(e) => handleUpdateMasterEntry(name, 'type', e.target.value)}
+                  className="flex-1 md:flex-none bg-slate-50 border-none rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                >
+                  {["운영진", "본캐", "부캐"].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button 
+                  onClick={() => handleDeleteMasterEntry(name)}
+                  className="p-2 text-rose-300 hover:text-rose-500 transition-colors"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             </div>
           ))}
         </div>
+
+        {/* Floating Action Bar */}
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-6">
+          <button 
+            onClick={() => handleSaveMaster(masterData.members)}
+            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black shadow-2xl flex items-center justify-center gap-2 hover:bg-blue-600 transition-all active:scale-[0.98]"
+          >
+            <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
+            변경사항 저장하기
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className={`min-h-screen ${THEME.bg} text-slate-800 font-sans selection:bg-blue-100`}>

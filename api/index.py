@@ -56,9 +56,15 @@ def save_master_list(data):
 
 # --- Endpoints ---
 
-@app.route('/api/master', methods=['GET'])
-def master_list_get():
-    return jsonify(get_master_list())
+@app.route('/api/master', methods=['GET', 'POST'])
+def master_list_route():
+    if request.method == 'GET':
+        return jsonify(get_master_list())
+    else:
+        # POST: Save entire list
+        data = request.json
+        save_master_list(data)
+        return jsonify({"success": True})
 
 @app.route('/api/scan', methods=['POST'])
 def scan_images():

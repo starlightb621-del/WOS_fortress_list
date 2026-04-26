@@ -28,15 +28,16 @@ const THEME = {
 // --- WOS Roster Extractor Logic (v8) ---
 const cleanRawName = (name) => {
   if (!name) return "";
+  // 1.2 연맹 태그 제거 ([GOM] 등) - 트리밍 전 수행
+  let cleaned = name.replace(/\[.*?\]/g, "");
+  cleaned = cleaned.replace(/\(.*?\)/g, "");
+  
   // 1.1 장식 문자 및 기호 제거
-  let cleaned = name.replace(/^[^a-zA-Z0-9가-힣]+/, "");
+  cleaned = cleaned.replace(/^[^a-zA-Z0-9가-힣]+/, "");
   cleaned = cleaned.replace(/[^a-zA-Z0-9가-힣]+$/, "");
   
-  // 1.2 연맹 태그 제거 ([GOM] 등)
-  cleaned = cleaned.replace(/\[.*?\]/g, "");
-  
-  // 1.2 한글 우선 추출 (한글 + 공백 + 영문 형태일 때 한글 2자 이상 우선)
-  const koreanMatch = cleaned.match(/([가-힣]{2,})\s+[a-zA-Z]+/);
+  // 1.2 한글 우선 추출 고도화
+  const koreanMatch = cleaned.match(/([가-힣]{2,})/);
   if (koreanMatch) {
     return koreanMatch[1];
   }
@@ -66,8 +67,9 @@ const levenshteinDistance = (s1, s2) => {
 };
 
 const calculateScore = (raw, master) => {
-  const r = raw.replace(/\s+/g, "");
-  const m = master.replace(/\s+/g, "");
+  // 특수문자 및 공백 제거 후 대문자 변환 비교
+  const r = raw.replace(/[^a-zA-Z0-9가-힣]/g, "").toUpperCase();
+  const m = master.replace(/[^a-zA-Z0-9가-힣]/g, "").toUpperCase();
 
   // 2.2 우선순위 필터링
   if (r === m) return 100;
@@ -75,11 +77,11 @@ const calculateScore = (raw, master) => {
   // 별칭(괄호 안) 체크
   const aliasMatch = master.match(/\((.*?)\)/);
   if (aliasMatch) {
-    const alias = aliasMatch[1].replace(/\s+/g, "");
-    if (r === alias) return 100;
+    const alias = aliasMatch[1].replace(/[^a-zA-Z0-9가-힣]/g, "").toUpperCase();
+    if (r === alias || alias.includes(r)) return 100;
   }
 
-  if (r.includes(m) || m.includes(r)) return 90;
+  if (r && m && (r.includes(m) || m.includes(r))) return 90;
 
   if (!r || !m) return 0;
   const dist = levenshteinDistance(r, m);

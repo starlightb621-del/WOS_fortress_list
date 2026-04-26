@@ -27,19 +27,19 @@ if REDIS_URL:
 # --- Helper Functions ---
 def clean_raw_name(name):
     if not name: return ""
-    # 1.1 장식 문자 및 기호 제거
-    # ^[^a-zA-Z0-9가-힣]+ (시작 기호 제거)
-    # [^a-zA-Z0-9가-힣]+$ (끝 기호 제거)
+    # 1.2 연맹 태그 제거 ([GOM] 등) - 트리밍 전에 먼저 수행
+    name = re.sub(r'\[.*?\]', '', name)
+    name = re.sub(r'\(.*?\)', '', name)
+    
+    # 1.1 장식 문자 및 기호 제거 (시작/끝 특수문자)
     name = re.sub(r'^[^a-zA-Z0-9가-힣]+', '', name)
     name = re.sub(r'[^a-zA-Z0-9가-힣]+$', '', name)
     
-    # 1.2 연맹 태그 제거 ([GOM] 등)
-    name = re.sub(r'\[.*?\]', '', name)
-    
-    # 1.2 한글 우선 추출 (한글 + 공백 + 영문 형태일 때 한글 2자 이상 우선)
-    # 예: "누나곰 Nuna" -> "누나곰"
-    korean_match = re.search(r'([가-힣]{2,})\s+[a-zA-Z]+', name)
+    # 1.2 한글 우선 추출 고도화 (한글 2자 이상이 포함되어 있으면 해당 부분을 우선 고려)
+    # 예: "미술랭곰~? X" -> "미술랭곰"
+    korean_match = re.search(r'([가-힣]{2,})', name)
     if korean_match:
+        # 한글 뒤에 공백이나 기호가 오고 영문이 오는 경우 등 처리
         return korean_match.group(1)
         
     return name.strip()
@@ -62,24 +62,24 @@ def levenshtein_distance(s1, s2):
     return previous_row[-1]
 
 def calculate_score(raw, master):
-    # 공백을 완전히 제거한 상태에서 비교
-    r = raw.replace(" ", "")
-    m = master.replace(" ", "")
+    # 특수문자 및 공백을 완전히 제거하고 대문자로 변환하여 비교
+    r = re.sub(r'[^a-zA-Z0-9가-힣]', '', raw).upper()
+    m = re.sub(r'[^a-zA-Z0-9가-힣]', '', master).upper()
     
     # 2.2 우선순위 필터링
     # 1. 완전 일치
     if r == m:
         return 100
     
-    # 별칭(괄호 안) 체크 - 마스터 이름에 괄호가 있는 경우 처리
+    # 별칭(괄호 안) 체크
     alias_match = re.search(r'\((.*?)\)', master)
     if alias_match:
-        alias = alias_match.group(1).replace(" ", "")
-        if r == alias:
+        alias = re.sub(r'[^a-zA-Z0-9가-힣]', '', alias_match.group(1)).upper()
+        if r == alias or alias in r:
             return 100
 
-    # 2. 포함 관계
-    if r in m or m in r:
+    # 2. 포함 관계 (알파뉴메릭 코어 기준)
+    if r and m and (r in m or m in r):
         return 90
         
     # 3. 유사도 매칭 (Levenshtein)

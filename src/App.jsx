@@ -443,31 +443,28 @@ const App = () => {
           reader.readAsDataURL(file);
         });
       }));
-      // 3. 병렬 처리 아키텍처 적용
-      const scanPromises = images.map(b64 => 
-        fetch('/api/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ images: [b64] })
-        }).then(res => res.json())
-      );
+      // Gemini 2.5 Flash 무료 버전의 할당량(429 오류) 문제를 해결하기 위해
+      // 모든 이미지를 하나의 요청으로 묶어서 전송합니다.
+      // 서버에서 이를 하나의 Gemini 호출로 처리하여 안정성을 확보합니다.
+      const res = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images })
+      });
       
-      const scanResults = await Promise.all(scanPromises);
+      const data = await res.json();
+      if (res.status === 429) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || "서버 오류 발생");
       
-      // 결과 병합 및 오류 처리
-      let combinedResults = [];
-      for (const data of scanResults) {
-        if (data.error) throw new Error(data.error);
-        if (data.results) combinedResults.push(...data.results);
-      }
+      const results = data.results || [];
 
-      // 중복 제거 (Set 활용 대신 Map으로 이름 기준 유니크 처리)
-      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...combinedResults].map(item => [item.name, item])).values());
+      // 중복 제거 및 정렬
+      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...results].map(item => [item.name, item])).values());
       const sortedList = sortParticipationList(uniqueList);
       const updated = { ...scannedData, [activeTime]: sortedList };
       setScannedData(updated);
       saveParticipation(activeTime, sortedList);
-      showStatus(`${combinedResults.length}명 추출 및 자동 보정 완료`, "success");
+      showStatus(`${results.length}명 추출 및 자동 보정 완료`, "success");
     } catch (err) {
       showStatus(err.message || "분석 중 오류 발생", "error");
     } finally {

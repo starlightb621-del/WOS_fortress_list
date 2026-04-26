@@ -140,22 +140,26 @@ def scan_images():
     )
 
     try:
-        # 3. 병렬 처리 아키텍처 (백엔드에서도 비동기로 처리하면 좋으나, 
-        # 일단 순차 처리하되 프롬프트를 최적화함. 사용자 요청에 따라 로직만 수정)
+        # Gemini 2.5 Flash Free Tier의 RPM(분당 요청 제한) 제한을 피하기 위해
+        # 여러 이미지를 하나의 generate_content 호출에 포함시켜 처리합니다.
+        # 이는 '병렬 처리'의 효과를 내면서도 429 오류를 방지하는 가장 효율적인 방법입니다.
+        parts = [system_instruction]
         for b64 in images_base64:
-            parts = [system_instruction]
             parts.append({"mime_type": "image/jpeg", "data": b64})
             
-            response = model.generate_content(parts)
-            text = response.text
-            
-            # Extract JSON Array [ "이름1", "이름2", ... ]
-            match = re.search(r'\[.*\]', text, re.DOTALL)
-            if match:
-                names = json.loads(match.group())
-                all_extracted_names.extend(names)
+        response = model.generate_content(parts)
+        text = response.text
+        
+        # Extract JSON Array [ "이름1", "이름2", ... ]
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            names = json.loads(match.group())
+            all_extracted_names.extend(names)
     except Exception as e:
-        return jsonify({"error": f"Gemini Error: {str(e)}"}), 500
+        error_msg = str(e)
+        if "429" in error_msg:
+            return jsonify({"error": "Gemini API 할당량 초과 (429). 잠시 후 다시 시도해주세요. (무료 버전은 분당 요청 수가 제한되어 있습니다.)"}), 429
+        return jsonify({"error": f"Gemini Error: {error_msg}"}), 500
 
     # 2. 매칭 엔진 적용
     master_data = get_master_list()

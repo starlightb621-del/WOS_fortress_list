@@ -19,7 +19,7 @@ MASTER_LIST_FILE = os.path.join(os.path.dirname(__file__), "master_list.json")
 # Initialize Gemini
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 kv = None
 if REDIS_URL:
     kv = redis.from_url(REDIS_URL, decode_responses=True)

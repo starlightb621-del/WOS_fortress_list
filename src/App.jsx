@@ -23,6 +23,201 @@ const THEME = {
   button: "hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
 };
 
+// --- Sub-components (Moved outside to prevent focus loss) ---
+const MainView = ({ 
+  activeTime, 
+  scannedData, 
+  loading, 
+  fileInputRef, 
+  handleScan, 
+  manualName, 
+  setManualName, 
+  handleManualAdd, 
+  handleResetParticipation, 
+  fetchParticipation, 
+  handleDelete, 
+  copyToClipboard, 
+  setView 
+}) => (
+  <div className="w-full max-w-md mx-auto space-y-5 pb-20 px-4">
+    {/* 1. Scan Button (Primary Action) */}
+    <div 
+      onClick={() => fileInputRef.current?.click()}
+      className={`${THEME.card} rounded-[2rem] p-8 flex flex-col items-center cursor-pointer border-dashed border-2 border-blue-100 hover:bg-blue-50/50 transition-all group`}
+    >
+      <input type="file" ref={fileInputRef} multiple onChange={handleScan} className="hidden" />
+      <div className={`w-16 h-16 bg-gradient-to-br ${THEME.primary} rounded-2xl flex items-center justify-center mb-4 shadow-xl group-hover:scale-110 transition-transform`}>
+        {loading ? <RefreshCw className="text-white animate-spin" /> : <Camera size={28} className="text-white" />}
+      </div>
+      <span className="text-base font-black text-slate-800 tracking-tight">스크린샷을 첨부해주세요</span>
+      <p className="text-[11px] text-slate-400 mt-2 font-medium tracking-tight">여러 장을 한 번에 선택하여 스캔하세요</p>
+      {loading && (
+        <div className="w-full mt-5 h-1.5 bg-blue-50 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500 animate-[loading_2s_infinite]" style={{ width: '45%' }} />
+        </div>
+      )}
+    </div>
+
+    {/* 2. Manual Input (Secondary Action) */}
+    <form 
+      onSubmit={handleManualAdd}
+      className={`${THEME.card} rounded-[1.5rem] p-3 flex gap-2 shadow-sm`}
+    >
+      <input 
+        type="text" 
+        value={manualName}
+        onChange={(e) => setManualName(e.target.value)}
+        placeholder="추가할 닉네임 직접 입력..."
+        className="flex-1 bg-slate-50/50 border-none rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 ring-blue-100 placeholder:text-slate-300"
+      />
+      <button 
+        type="submit"
+        className={`bg-slate-900 text-white px-6 rounded-xl font-black text-sm ${THEME.button}`}
+      >
+        추가
+      </button>
+    </form>
+
+    {/* 3. List Area */}
+    <div className={`${THEME.card} rounded-[2rem] overflow-hidden shadow-2xl shadow-blue-900/5`}>
+      <div className="p-5 flex justify-between items-center border-b border-slate-50 bg-slate-50/30">
+        <span className="text-[13px] font-black text-slate-800 uppercase tracking-tight">참여 명단 ({scannedData[activeTime].length}명)</span>
+        <div className="flex items-center gap-1">
+          <button onClick={handleResetParticipation} className="flex items-center gap-1 px-3 py-2 hover:bg-white rounded-xl transition-colors group text-[12px] font-bold" title="초기화">
+            <Trash2 size={14} className="text-slate-300 group-hover:text-rose-500" />
+            <span className="text-slate-400 group-hover:text-rose-500">초기화</span>
+          </button>
+          <button onClick={() => fetchParticipation(activeTime)} className="p-2 hover:bg-white rounded-full transition-colors group" title="새로고침">
+            <RefreshCw size={14} className="text-slate-300 group-hover:text-blue-500" />
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-[380px] overflow-y-auto px-4 py-3 space-y-2.5">
+        {scannedData[activeTime].length === 0 ? (
+          <div className="py-20 flex flex-col items-center text-slate-200">
+            <Database size={48} strokeWidth={1} />
+            <p className="text-[11px] mt-4 font-black text-slate-300">스캔된 데이터가 없습니다</p>
+          </div>
+        ) : (
+          scannedData[activeTime].map((p, i) => (
+            <div key={`p-${p.name}`} className="flex items-center justify-between p-3.5 bg-white border border-slate-50 rounded-2xl shadow-sm hover:border-blue-100 transition-colors animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-black text-blue-200 w-5">{i + 1}</span>
+                <span className="text-[14px] font-black text-slate-700">{p.name}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${
+                  p.type === '운영진' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
+                  p.type === '본캐' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
+                  'bg-slate-50 text-slate-400 border border-slate-100'
+                }`}>
+                  {p.type}
+                </span>
+                <button onClick={() => handleDelete(p.name)} className="p-1.5 hover:bg-rose-50 rounded-lg text-rose-200 hover:text-rose-500 transition-colors">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="p-6 bg-slate-50/50 border-t border-slate-50">
+        <button 
+          onClick={copyToClipboard}
+          className={`w-full py-3.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl font-black shadow-xl shadow-blue-200 flex items-center justify-center gap-2.5 ${THEME.button}`}
+        >
+          <Copy size={18} /> 명단 복사하기
+        </button>
+        <button onClick={() => setView('admin')} className="w-full mt-4 flex items-center justify-center gap-1.5 text-[13px] font-black text-slate-500 hover:text-blue-600 transition-colors">
+          <Settings size={16} /> 마스터 명단 확인
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+const AdminView = ({ 
+  masterData, 
+  setView, 
+  handleAddMasterEntry, 
+  handleUpdateMasterEntry, 
+  handleDeleteMasterEntry, 
+  handleSaveMaster 
+}) => {
+  const rankPriority = { "R5": 0, "R4": 1, "R3": 2, "R2": 3, "R1": 4 };
+  const members = Object.entries(masterData.members).sort((a, b) => {
+    const aRank = a[1].rank?.toUpperCase() || "R1";
+    const bRank = b[1].rank?.toUpperCase() || "R1";
+    const rankDiff = (rankPriority[aRank] ?? 5) - (rankPriority[bRank] ?? 5);
+    if (rankDiff !== 0) return rankDiff;
+    return a[0].localeCompare(b[0], 'ko');
+  });
+  
+  return (
+    <div className="w-full max-w-2xl mx-auto p-4 md:p-6 animate-in fade-in slide-in-from-right-4 pb-20">
+      <header className="flex items-center justify-between mb-8">
+        <button onClick={() => setView('main')} className="p-2 hover:bg-white rounded-xl transition-colors bg-white/50 border border-white shadow-sm">
+          <ChevronLeft size={24} className="text-slate-500" />
+        </button>
+        <div className="text-center">
+          <h2 className="text-xl font-black tracking-tight">마스터 명단 관리</h2>
+          <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-wider">Vercel KV Cloud Sync</p>
+        </div>
+        <button onClick={handleAddMasterEntry} className="p-2.5 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors">
+          <UserPlus size={24} />
+        </button>
+      </header>
+
+      <div className="space-y-3 mb-12">
+        {members.map(([name, info], i) => (
+          <div key={`member-${i}`} className={`${THEME.card} rounded-2xl p-4 flex flex-col md:flex-row gap-3 items-center group border-transparent hover:border-blue-100 transition-all`}>
+            <div className="flex items-center gap-3 w-full md:w-auto flex-1">
+              <span className="text-[10px] font-black text-blue-200 w-6">{i + 1}</span>
+              <input 
+                type="text" 
+                value={name}
+                onChange={(e) => handleUpdateMasterEntry(name, 'name', e.target.value)}
+                className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none text-[15px]"
+              />
+            </div>
+            <div className="flex gap-2 w-full md:w-auto">
+              <select 
+                value={info.rank}
+                onChange={(e) => handleUpdateMasterEntry(name, 'rank', e.target.value)}
+                className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer"
+              >
+                {["R5", "R4", "R3", "R2", "R1"].map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <select 
+                value={info.type}
+                onChange={(e) => handleUpdateMasterEntry(name, 'type', e.target.value)}
+                className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer"
+              >
+                {["운영진", "본캐", "부캐"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <button onClick={() => handleDeleteMasterEntry(name)} className="p-2 text-rose-200 hover:text-rose-500 transition-colors">
+                <Trash2 size={18} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-6 z-50">
+        <button 
+          onClick={() => handleSaveMaster(masterData.members)}
+          className="w-full py-4.5 bg-slate-900 text-white rounded-[1.5rem] font-black shadow-2xl flex items-center justify-center gap-3 hover:bg-blue-600 transition-all active:scale-[0.98]"
+        >
+          <RefreshCw size={18} />
+          <span>변경사항 저장하기</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const App = () => {
   const [view, setView] = useState('main'); // 'main' | 'admin'
   const [activeTime, setActiveTime] = useState("12시");
@@ -195,15 +390,11 @@ const App = () => {
   };
 
   const handleResetParticipation = () => {
-    const input = window.prompt("정말로 명단을 초기화하시겠습니까? 초기화를 원하시면 '초기화'라고 입력해주세요.");
-    if (input === "초기화") {
-      const updated = { ...scannedData, [activeTime]: [] };
-      setScannedData(updated);
-      saveParticipation(activeTime, []);
-      showStatus(`${activeTime} 명단이 초기화되었습니다`, "success");
-    } else if (input !== null) {
-      showStatus("문구가 일치하지 않아 취소되었습니다", "error");
-    }
+    if (!window.confirm("정말로 명단을 초기화하시겠습니까?")) return;
+    const updated = { ...scannedData, [activeTime]: [] };
+    setScannedData(updated);
+    saveParticipation(activeTime, []);
+    showStatus(`${activeTime} 명단이 초기화되었습니다`, "success");
   };
 
   const sortParticipationList = (list) => {
@@ -230,179 +421,6 @@ const App = () => {
     const text = header + list.map((p, i) => `${i + 1}. ${p.name}_${p.type}`).join('\n');
     navigator.clipboard.writeText(text);
     showStatus("클립보드에 복사되었습니다", "success");
-  };
-
-  // --- Sub-components ---
-  const MainView = () => (
-    <div className="w-full max-w-md mx-auto space-y-5 pb-20 px-4">
-      {/* 1. Scan Button (Primary Action) */}
-      <div 
-        onClick={() => fileInputRef.current?.click()}
-        className={`${THEME.card} rounded-[2rem] p-8 flex flex-col items-center cursor-pointer border-dashed border-2 border-blue-100 hover:bg-blue-50/50 transition-all group`}
-      >
-        <input type="file" ref={fileInputRef} multiple onChange={handleScan} className="hidden" />
-        <div className={`w-16 h-16 bg-gradient-to-br ${THEME.primary} rounded-2xl flex items-center justify-center mb-4 shadow-xl group-hover:scale-110 transition-transform`}>
-          {loading ? <RefreshCw className="text-white animate-spin" /> : <Camera size={28} className="text-white" />}
-        </div>
-        <span className="text-base font-black text-slate-800 tracking-tight">스크린샷을 첨부해주세요</span>
-        <p className="text-[11px] text-slate-400 mt-2 font-medium tracking-tight">여러 장을 한 번에 선택하여 스캔하세요</p>
-        {loading && (
-          <div className="w-full mt-5 h-1.5 bg-blue-50 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 animate-[loading_2s_infinite]" style={{ width: '45%' }} />
-          </div>
-        )}
-      </div>
-
-      {/* 2. Manual Input (Secondary Action) */}
-      <form 
-        onSubmit={handleManualAdd}
-        className={`${THEME.card} rounded-[1.5rem] p-3 flex gap-2 shadow-sm`}
-      >
-        <input 
-          type="text" 
-          value={manualName}
-          onChange={(e) => setManualName(e.target.value)}
-          placeholder="추가할 닉네임 직접 입력..."
-          className="flex-1 bg-slate-50/50 border-none rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 ring-blue-100 placeholder:text-slate-300"
-        />
-        <button 
-          type="submit"
-          className={`bg-slate-900 text-white px-6 rounded-xl font-black text-sm ${THEME.button}`}
-        >
-          추가
-        </button>
-      </form>
-
-      {/* 3. List Area */}
-      <div className={`${THEME.card} rounded-[2rem] overflow-hidden shadow-2xl shadow-blue-900/5`}>
-        <div className="p-5 flex justify-between items-center border-b border-slate-50 bg-slate-50/30">
-          <span className="text-[13px] font-black text-slate-800 uppercase tracking-tight">참여 명단 ({scannedData[activeTime].length}명)</span>
-          <div className="flex gap-1">
-            <button onClick={handleResetParticipation} className="p-2 hover:bg-white rounded-full transition-colors group" title="초기화">
-              <Trash2 size={14} className="text-slate-300 group-hover:text-rose-500" />
-            </button>
-            <button onClick={() => fetchParticipation(activeTime)} className="p-2 hover:bg-white rounded-full transition-colors group" title="새로고침">
-              <RefreshCw size={14} className="text-slate-300 group-hover:text-blue-500" />
-            </button>
-          </div>
-        </div>
-
-        <div className="max-h-[380px] overflow-y-auto px-4 py-3 space-y-2.5">
-          {scannedData[activeTime].length === 0 ? (
-            <div className="py-20 flex flex-col items-center text-slate-200">
-              <Database size={48} strokeWidth={1} />
-              <p className="text-[11px] mt-4 font-black text-slate-300">스캔된 데이터가 없습니다</p>
-            </div>
-          ) : (
-            scannedData[activeTime].map((p, i) => (
-              <div key={p.name} className="flex items-center justify-between p-3.5 bg-white border border-slate-50 rounded-2xl shadow-sm hover:border-blue-100 transition-colors animate-in fade-in slide-in-from-bottom-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-black text-blue-200 w-5">{i + 1}</span>
-                  <span className="text-[14px] font-black text-slate-700">{p.name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${
-                    p.type === '운영진' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
-                    p.type === '본캐' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
-                    'bg-slate-50 text-slate-400 border border-slate-100'
-                  }`}>
-                    {p.type}
-                  </span>
-                  <button onClick={() => handleDelete(p.name)} className="p-1.5 hover:bg-rose-50 rounded-lg text-rose-200 hover:text-rose-500 transition-colors">
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="p-6 bg-slate-50/50 border-t border-slate-50">
-          <button 
-            onClick={copyToClipboard}
-            className={`w-full py-3.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl font-black shadow-xl shadow-blue-200 flex items-center justify-center gap-2.5 ${THEME.button}`}
-          >
-            <Copy size={18} /> 명단 복사하기
-          </button>
-          <button onClick={() => setView('admin')} className="w-full mt-4 flex items-center justify-center gap-1.5 text-[13px] font-black text-slate-500 hover:text-blue-600 transition-colors">
-            <Settings size={16} /> 마스터 명단 확인
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const AdminView = () => {
-    const rankPriority = { "R5": 0, "R4": 1, "R3": 2, "R2": 3, "R1": 4 };
-    const members = Object.entries(masterData.members).sort((a, b) => {
-      const aRank = a[1].rank?.toUpperCase() || "R1";
-      const bRank = b[1].rank?.toUpperCase() || "R1";
-      const rankDiff = (rankPriority[aRank] ?? 5) - (rankPriority[bRank] ?? 5);
-      if (rankDiff !== 0) return rankDiff;
-      return a[0].localeCompare(b[0], 'ko');
-    });
-    
-    return (
-      <div className="w-full max-w-2xl mx-auto p-4 md:p-6 animate-in fade-in slide-in-from-right-4 pb-20">
-        <header className="flex items-center justify-between mb-8">
-          <button onClick={() => setView('main')} className="p-2 hover:bg-white rounded-xl transition-colors bg-white/50 border border-white shadow-sm">
-            <ChevronLeft size={24} className="text-slate-500" />
-          </button>
-          <div className="text-center">
-            <h2 className="text-xl font-black tracking-tight">마스터 명단 관리</h2>
-            <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-wider">Vercel KV Cloud Sync</p>
-          </div>
-          <button onClick={handleAddMasterEntry} className="p-2.5 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors">
-            <UserPlus size={24} />
-          </button>
-        </header>
-
-        <div className="space-y-3 mb-12">
-          {members.map(([name, info], i) => (
-            <div key={name} className={`${THEME.card} rounded-2xl p-4 flex flex-col md:flex-row gap-3 items-center group border-transparent hover:border-blue-100 transition-all`}>
-              <div className="flex items-center gap-3 w-full md:w-auto flex-1">
-                <span className="text-[10px] font-black text-blue-200 w-6">{i + 1}</span>
-                <input 
-                  type="text" 
-                  value={name}
-                  onChange={(e) => handleUpdateMasterEntry(name, 'name', e.target.value)}
-                  className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none text-[15px]"
-                />
-              </div>
-              <div className="flex gap-2 w-full md:w-auto">
-                <select 
-                  value={info.rank}
-                  onChange={(e) => handleUpdateMasterEntry(name, 'rank', e.target.value)}
-                  className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer"
-                >
-                  {["R5", "R4", "R3", "R2", "R1"].map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <select 
-                  value={info.type}
-                  onChange={(e) => handleUpdateMasterEntry(name, 'type', e.target.value)}
-                  className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer"
-                >
-                  {["운영진", "본캐", "부캐"].map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <button onClick={() => handleDeleteMasterEntry(name)} className="p-2 text-rose-200 hover:text-rose-500 transition-colors">
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-6 z-50">
-          <button 
-            onClick={() => handleSaveMaster(masterData.members)}
-            className="w-full py-4.5 bg-slate-900 text-white rounded-[1.5rem] font-black shadow-2xl flex items-center justify-center gap-3 hover:bg-blue-600 transition-all active:scale-[0.98]"
-          >
-            <RefreshCw size={18} />
-            <span>변경사항 저장하기</span>
-          </button>
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -443,7 +461,32 @@ const App = () => {
           </nav>
         )}
 
-        {view === 'main' ? <MainView /> : <AdminView />}
+        {view === 'main' ? (
+          <MainView 
+            activeTime={activeTime}
+            scannedData={scannedData}
+            loading={loading}
+            fileInputRef={fileInputRef}
+            handleScan={handleScan}
+            manualName={manualName}
+            setManualName={setManualName}
+            handleManualAdd={handleManualAdd}
+            handleResetParticipation={handleResetParticipation}
+            fetchParticipation={fetchParticipation}
+            handleDelete={handleDelete}
+            copyToClipboard={copyToClipboard}
+            setView={setView}
+          />
+        ) : (
+          <AdminView 
+            masterData={masterData}
+            setView={setView}
+            handleAddMasterEntry={handleAddMasterEntry}
+            handleUpdateMasterEntry={handleUpdateMasterEntry}
+            handleDeleteMasterEntry={handleDeleteMasterEntry}
+            handleSaveMaster={handleSaveMaster}
+          />
+        )}
 
         {/* Global Toast */}
         {statusMsg.text && (

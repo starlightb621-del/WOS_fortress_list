@@ -25,6 +25,81 @@ const THEME = {
   button: "hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
 };
 
+// --- WOS Roster Extractor Logic (v8) ---
+const cleanRawName = (name) => {
+  if (!name) return "";
+  // 1.1 장식 문자 및 기호 제거
+  let cleaned = name.replace(/^[^a-zA-Z0-9가-힣]+/, "");
+  cleaned = cleaned.replace(/[^a-zA-Z0-9가-힣]+$/, "");
+  
+  // 1.2 연맹 태그 제거 ([GOM] 등)
+  cleaned = cleaned.replace(/\[.*?\]/g, "");
+  
+  // 1.2 한글 우선 추출 (한글 + 공백 + 영문 형태일 때 한글 2자 이상 우선)
+  const koreanMatch = cleaned.match(/([가-힣]{2,})\s+[a-zA-Z]+/);
+  if (koreanMatch) {
+    return koreanMatch[1];
+  }
+  
+  return cleaned.trim();
+};
+
+const levenshteinDistance = (s1, s2) => {
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const matrix = Array.from({ length: len1 + 1 }, () => Array(len2 + 1).fill(0));
+
+  for (let i = 0; i <= len1; i++) matrix[i][0] = i;
+  for (let j = 0; j <= len2; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[len1][len2];
+};
+
+const calculateScore = (raw, master) => {
+  const r = raw.replace(/\s+/g, "");
+  const m = master.replace(/\s+/g, "");
+
+  // 2.2 우선순위 필터링
+  if (r === m) return 100;
+
+  // 별칭(괄호 안) 체크
+  const aliasMatch = master.match(/\((.*?)\)/);
+  if (aliasMatch) {
+    const alias = aliasMatch[1].replace(/\s+/g, "");
+    if (r === alias) return 100;
+  }
+
+  if (r.includes(m) || m.includes(r)) return 90;
+
+  if (!r || !m) return 0;
+  const dist = levenshteinDistance(r, m);
+  const maxLen = Math.max(r.length, m.length);
+  return (1 - dist / maxLen) * 100;
+};
+
+const findBestMatch = (raw, masterData) => {
+  const cleaned = cleanRawName(raw);
+  let best = { name: "매칭 실패", similarity: 0 };
+
+  for (const [mName, info] of Object.entries(masterData.members)) {
+    const score = calculateScore(cleaned, mName);
+    if (score > best.similarity) {
+      best = { name: mName, ...info, similarity: score };
+    }
+  }
+  return best.similarity >= 50 ? best : { name: "매칭 실패", similarity: 0 };
+};
+
 // --- Custom Modal Component ---
 const Modal = ({ isOpen, onClose, title, message, children, confirmText = "확인", cancelText = "취소", onConfirm, type = "info" }) => {
   if (!isOpen) return null;
@@ -366,19 +441,31 @@ const App = () => {
           reader.readAsDataURL(file);
         });
       }));
-      const res = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...data.results].map(item => [item.name, item])).values());
+      // 3. 병렬 처리 아키텍처 적용
+      const scanPromises = images.map(b64 => 
+        fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: [b64] })
+        }).then(res => res.json())
+      );
+      
+      const scanResults = await Promise.all(scanPromises);
+      
+      // 결과 병합 및 오류 처리
+      let combinedResults = [];
+      for (const data of scanResults) {
+        if (data.error) throw new Error(data.error);
+        if (data.results) combinedResults.push(...data.results);
+      }
+
+      // 중복 제거 (Set 활용 대신 Map으로 이름 기준 유니크 처리)
+      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...combinedResults].map(item => [item.name, item])).values());
       const sortedList = sortParticipationList(uniqueList);
       const updated = { ...scannedData, [activeTime]: sortedList };
       setScannedData(updated);
       saveParticipation(activeTime, sortedList);
-      showStatus(`${data.results.length}명 추출 및 자동 보정 완료`, "success");
+      showStatus(`${combinedResults.length}명 추출 및 자동 보정 완료`, "success");
     } catch (err) {
       showStatus(err.message || "분석 중 오류 발생", "error");
     } finally {
@@ -436,15 +523,18 @@ const App = () => {
 
   const handleRematchParticipation = () => {
     const newList = scannedData[activeTime].map(p => {
-      const masterInfo = masterData.members[p.name.trim()];
-      return masterInfo 
-        ? { name: p.name, rank: masterInfo.rank, type: masterInfo.type }
-        : { ...p, type: "미등록" };
+      // 이미 매칭된 경우(미등록이 아닌 경우)는 유지하거나 재검증
+      // 여기서는 전체 다시 보정 로직 적용
+      const match = findBestMatch(p.name, masterData);
+      if (match.name !== "매칭 실패") {
+        return { name: match.name, rank: match.rank, type: match.type };
+      }
+      return { ...p, type: "미등록" };
     });
     const sorted = sortParticipationList(newList);
     setScannedData({ ...scannedData, [activeTime]: sorted });
     saveParticipation(activeTime, sorted);
-    showStatus("마스터 명단 기준 재매칭 완료", "success");
+    showStatus("마스터 명단 기준 재매칭 및 보정 완료", "success");
   };
 
   const openResetModal = () => {

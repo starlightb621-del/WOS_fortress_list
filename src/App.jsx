@@ -227,7 +227,8 @@ const MainView = ({
   copyToClipboard, 
   setView,
   handleUpdateParticipationName,
-  handleRematchParticipation
+  handleRematchParticipation,
+  progress
 }) => (
   <div className="w-full max-w-md mx-auto space-y-5 pb-20 px-4">
     <div 
@@ -241,8 +242,17 @@ const MainView = ({
       <span className="text-base font-black text-slate-800 tracking-tight">스크린샷을 첨부해주세요</span>
       <p className="text-[11px] text-slate-400 mt-2 font-medium tracking-tight">여러 장을 한 번에 선택하여 스캔하세요</p>
       {loading && (
-        <div className="w-full mt-5 h-1.5 bg-blue-50 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 animate-[loading_2s_infinite]" style={{ width: '45%' }} />
+        <div className="w-full mt-6 space-y-2">
+          <div className="flex justify-between items-center px-1">
+            <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Analyzing...</span>
+            <span className="text-[10px] font-black text-blue-600">{progress}%</span>
+          </div>
+          <div className="w-full h-2 bg-blue-50 rounded-full overflow-hidden border border-blue-100/50 p-[2px]">
+            <div 
+              className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-500 ease-out shadow-[0_0_8px_rgba(59,130,246,0.3)]" 
+              style={{ width: `${progress}%` }} 
+            />
+          </div>
         </div>
       )}
     </div>
@@ -378,6 +388,7 @@ const App = () => {
   const [scannedData, setScannedData] = useState({ "12시": [], "18시": [], "21시": [] });
   const [masterData, setMasterData] = useState({ members: {} });
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [statusMsg, setStatusMsg] = useState({ text: "", type: "info" });
   const [manualName, setManualName] = useState("");
   const fileInputRef = useRef(null);
@@ -434,6 +445,7 @@ const App = () => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
     setLoading(true);
+    setProgress(0);
     showStatus("AI 엔진 분석 중...", "info");
     try {
       const images = await Promise.all(files.map(file => {
@@ -443,32 +455,40 @@ const App = () => {
           reader.readAsDataURL(file);
         });
       }));
-      // Gemini 2.5 Flash 무료 버전의 할당량(429 오류) 문제를 해결하기 위해
-      // 모든 이미지를 하나의 요청으로 묶어서 전송합니다.
-      // 서버에서 이를 하나의 Gemini 호출로 처리하여 안정성을 확보합니다.
-      const res = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images })
-      });
       
-      const data = await res.json();
-      if (res.status === 429) throw new Error(data.error);
-      if (!res.ok) throw new Error(data.error || "서버 오류 발생");
+      // 할당량(429) 문제를 방지하면서 진행도를 표시하기 위해 5장씩 묶어서 처리
+      const CHUNK_SIZE = 5;
+      let combinedResults = [];
       
-      const results = data.results || [];
-
-      // 중복 제거 및 정렬
-      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...results].map(item => [item.name, item])).values());
+      for (let i = 0; i < images.length; i += CHUNK_SIZE) {
+        const chunk = images.slice(i, i + CHUNK_SIZE);
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: chunk })
+        });
+        
+        const data = await res.json();
+        if (res.status === 429) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.error || "서버 오류 발생");
+        
+        if (data.results) combinedResults.push(...data.results);
+        
+        const currentProgress = Math.min(Math.round(((i + chunk.length) / images.length) * 100), 100);
+        setProgress(currentProgress);
+      }
+      
+      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...combinedResults].map(item => [item.name, item])).values());
       const sortedList = sortParticipationList(uniqueList);
       const updated = { ...scannedData, [activeTime]: sortedList };
       setScannedData(updated);
       saveParticipation(activeTime, sortedList);
-      showStatus(`${results.length}명 추출 및 자동 보정 완료`, "success");
+      showStatus(`${combinedResults.length}명 추출 및 자동 보정 완료`, "success");
     } catch (err) {
       showStatus(err.message || "분석 중 오류 발생", "error");
     } finally {
       setLoading(false);
+      setProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -680,7 +700,7 @@ const App = () => {
           </nav>
         )}
         {view === 'main' ? (
-          <MainView activeTime={activeTime} scannedData={scannedData} loading={loading} fileInputRef={fileInputRef} handleScan={handleScan} manualName={manualName} setManualName={setManualName} handleManualAdd={handleManualAdd} openResetModal={openResetModal} fetchParticipation={fetchParticipation} openDeleteModal={openDeleteModal} copyToClipboard={copyToClipboard} setView={setView} handleUpdateParticipationName={handleUpdateParticipationName} handleRematchParticipation={handleRematchParticipation} />
+          <MainView activeTime={activeTime} scannedData={scannedData} loading={loading} fileInputRef={fileInputRef} handleScan={handleScan} manualName={manualName} setManualName={setManualName} handleManualAdd={handleManualAdd} openResetModal={openResetModal} fetchParticipation={fetchParticipation} openDeleteModal={openDeleteModal} copyToClipboard={copyToClipboard} setView={setView} handleUpdateParticipationName={handleUpdateParticipationName} handleRematchParticipation={handleRematchParticipation} progress={progress} />
         ) : (
           <AdminView masterData={masterData} setView={setView} openAddMasterModal={openAddMasterModal} handleUpdateMasterEntry={handleUpdateMasterEntry} openDeleteMasterModal={openDeleteMasterModal} handleSaveMaster={handleSaveMaster} lastActionTarget={lastActionTarget} />
         )}

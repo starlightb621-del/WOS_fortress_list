@@ -370,7 +370,7 @@ const App = () => {
             onClick={() => handleSaveMaster(masterData.members)}
             className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black shadow-2xl flex items-center justify-center gap-2 hover:bg-blue-600 transition-all active:scale-[0.98]"
           >
-            <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
+            <RefreshCw size={18} />
             변경사항 저장하기
           </button>
         </div>

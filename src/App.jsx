@@ -394,6 +394,7 @@ const App = () => {
           </div>
           <h1 className="text-3xl font-black tracking-tight text-slate-900">
             WOS 요새쟁탈 <span className="text-blue-600">명단 PRO</span>
+            <span className="ml-2 text-[10px] bg-slate-100 text-slate-400 px-2 py-0.5 rounded-md align-middle font-bold">v1.4.0</span>
           </h1>
         </header>
 
@@ -426,11 +427,6 @@ const App = () => {
             <span className="text-sm font-bold">{statusMsg.text}</span>
           </div>
         )}
-
-        {/* Version Footer */}
-        <div className="mt-8 text-[10px] font-bold text-slate-300">
-          WOS Fortress Tracker PRO v1.4.0
-        </div>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `

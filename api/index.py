@@ -2,7 +2,6 @@ import os
 import json
 import re
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import google.generativeai as genai
 import redis
 from difflib import SequenceMatcher
@@ -11,7 +10,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
 
 # --- Configuration ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")

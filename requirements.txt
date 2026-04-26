@@ -1,6 +1,4 @@
 flask
-flask-cors
 google-generativeai
 redis
 python-dotenv
-difflib

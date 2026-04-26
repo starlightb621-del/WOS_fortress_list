@@ -51,6 +51,89 @@ const Modal = ({ isOpen, onClose, title, message, children, confirmText = "확�
   );
 };
 
+// --- Editable Row Components to prevent immediate re-sort & IME issues ---
+const ParticipationRow = ({ p, i, handleUpdateParticipationName, openDeleteModal }) => {
+  const [localName, setLocalName] = useState(p.name);
+
+  useEffect(() => {
+    setLocalName(p.name);
+  }, [p.name]);
+
+  const handleBlur = () => {
+    if (localName !== p.name) {
+      handleUpdateParticipationName(p.name, localName);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between p-3.5 bg-white border border-slate-50 rounded-2xl shadow-sm hover:border-blue-100 transition-colors animate-in fade-in slide-in-from-bottom-2">
+      <div className="flex items-center gap-3 flex-1">
+        <span className="text-[10px] font-black text-blue-200 w-5">{i + 1}</span>
+        <input 
+          type="text"
+          value={localName}
+          onChange={(e) => setLocalName(e.target.value)}
+          onBlur={handleBlur}
+          className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none text-[14px]"
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${
+          p.type === '운영진' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
+          p.type === '본캐' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
+          'bg-slate-50 text-slate-400 border border-slate-100'
+        }`}>
+          {p.type}
+        </span>
+        <button onClick={() => openDeleteModal(p.name)} className="p-1.5 hover:bg-rose-50 rounded-lg text-rose-200 hover:text-rose-500 transition-colors">
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const MasterRow = ({ name, info, i, handleUpdateMasterEntry, openDeleteMasterModal, itemRefs }) => {
+  const [localName, setLocalName] = useState(name);
+
+  useEffect(() => {
+    setLocalName(name);
+  }, [name]);
+
+  const handleBlur = () => {
+    if (localName !== name) {
+      handleUpdateMasterEntry(name, 'name', localName);
+    }
+  };
+
+  return (
+    <div 
+      ref={el => itemRefs.current[name] = el}
+      className={`${THEME.card} rounded-2xl p-4 flex flex-col md:flex-row gap-3 items-center group border-transparent hover:border-blue-100 transition-all`}
+    >
+      <div className="flex items-center gap-3 w-full md:w-auto flex-1">
+        <span className="text-[10px] font-black text-blue-200 w-6">{i + 1}</span>
+        <input 
+          type="text" 
+          value={localName}
+          onChange={(e) => setLocalName(e.target.value)}
+          onBlur={handleBlur}
+          className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none text-[15px]"
+        />
+      </div>
+      <div className="flex gap-2 w-full md:w-auto">
+        <select value={info.rank} onChange={(e) => handleUpdateMasterEntry(name, 'rank', e.target.value)} className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer">
+          {["R5", "R4", "R3", "R2", "R1"].map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select value={info.type} onChange={(e) => handleUpdateMasterEntry(name, 'type', e.target.value)} className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer">
+          {["운영진", "본캐", "부캐"].map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button onClick={() => openDeleteMasterModal(name)} className="p-2 text-rose-200 hover:text-rose-500 transition-colors"><Trash2 size={18} /></button>
+      </div>
+    </div>
+  );
+};
+
 // --- Sub-components ---
 const MainView = ({ 
   activeTime, 
@@ -124,29 +207,13 @@ const MainView = ({
           </div>
         ) : (
           scannedData[activeTime].map((p, i) => (
-            <div key={`p-${p.name}`} className="flex items-center justify-between p-3.5 bg-white border border-slate-50 rounded-2xl shadow-sm hover:border-blue-100 transition-colors animate-in fade-in slide-in-from-bottom-2">
-              <div className="flex items-center gap-3 flex-1">
-                <span className="text-[10px] font-black text-blue-200 w-5">{i + 1}</span>
-                <input 
-                  type="text"
-                  value={p.name}
-                  onChange={(e) => handleUpdateParticipationName(p.name, e.target.value)}
-                  className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none text-[14px]"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${
-                  p.type === '운영진' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
-                  p.type === '본캐' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
-                  'bg-slate-50 text-slate-400 border border-slate-100'
-                }`}>
-                  {p.type}
-                </span>
-                <button onClick={() => openDeleteModal(p.name)} className="p-1.5 hover:bg-rose-50 rounded-lg text-rose-200 hover:text-rose-500 transition-colors">
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
+            <ParticipationRow 
+              key={`p-${p.name}`} 
+              p={p} 
+              i={i} 
+              handleUpdateParticipationName={handleUpdateParticipationName} 
+              openDeleteModal={openDeleteModal} 
+            />
           ))
         )}
       </div>
@@ -207,30 +274,15 @@ const AdminView = ({
 
       <div className="space-y-3 mb-12">
         {members.map(([name, info], i) => (
-          <div 
-            key={`member-${name}-${i}`} 
-            ref={el => itemRefs.current[name] = el}
-            className={`${THEME.card} rounded-2xl p-4 flex flex-col md:flex-row gap-3 items-center group border-transparent hover:border-blue-100 transition-all`}
-          >
-            <div className="flex items-center gap-3 w-full md:w-auto flex-1">
-              <span className="text-[10px] font-black text-blue-200 w-6">{i + 1}</span>
-              <input 
-                type="text" 
-                value={name}
-                onChange={(e) => handleUpdateMasterEntry(name, 'name', e.target.value)}
-                className="flex-1 bg-transparent border-none font-black text-slate-700 focus:text-blue-600 outline-none text-[15px]"
-              />
-            </div>
-            <div className="flex gap-2 w-full md:w-auto">
-              <select value={info.rank} onChange={(e) => handleUpdateMasterEntry(name, 'rank', e.target.value)} className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer">
-                {["R5", "R4", "R3", "R2", "R1"].map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <select value={info.type} onChange={(e) => handleUpdateMasterEntry(name, 'type', e.target.value)} className="flex-1 md:flex-none bg-slate-50/80 border-none rounded-xl px-3 py-2 text-[11px] font-black outline-none cursor-pointer">
-                {["운영진", "본캐", "부캐"].map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <button onClick={() => openDeleteMasterModal(name)} className="p-2 text-rose-200 hover:text-rose-500 transition-colors"><Trash2 size={18} /></button>
-            </div>
-          </div>
+          <MasterRow 
+            key={`member-${name}`}
+            name={name}
+            info={info}
+            i={i}
+            handleUpdateMasterEntry={handleUpdateMasterEntry}
+            openDeleteMasterModal={openDeleteMasterModal}
+            itemRefs={itemRefs}
+          />
         ))}
       </div>
 

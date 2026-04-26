@@ -53,7 +53,8 @@ const App = () => {
     try {
       const res = await fetch(`/api/participation?time=${time}`);
       const data = await res.json();
-      setScannedData(prev => ({ ...prev, [time]: data }));
+      const sorted = sortParticipationList(data);
+      setScannedData(prev => ({ ...prev, [time]: sorted }));
     } catch (e) {
       console.error(`Failed to fetch ${time} participation`);
     }
@@ -102,17 +103,13 @@ const App = () => {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      // Merge results with existing list (deduplicate)
-      const newList = [...scannedData[activeTime], ...data.results];
-      const uniqueList = Array.from(new Map(newList.map(item => [item.name, item])).values());
-      
-      // Sort: Type priority, then Name
-      const typePriority = { "운영진": 0, "본캐": 1, "부캐": 2, "미등록": 3 };
-      uniqueList.sort((a, b) => (typePriority[a.type] || 4) - (typePriority[b.type] || 4) || a.name.localeCompare(b.name, 'ko'));
+      // Sort and Deduplicate
+      const uniqueList = Array.from(new Map([...scannedData[activeTime], ...data.results].map(item => [item.name, item])).values());
+      const sortedList = sortParticipationList(uniqueList);
 
-      const updated = { ...scannedData, [activeTime]: uniqueList };
+      const updated = { ...scannedData, [activeTime]: sortedList };
       setScannedData(updated);
-      saveParticipation(activeTime, uniqueList);
+      saveParticipation(activeTime, sortedList);
       showStatus(`${data.results.length}명 추출 및 자동 보정 완료`, "success");
     } catch (err) {
       showStatus(err.message || "분석 중 오류 발생", "error");
@@ -169,26 +166,52 @@ const App = () => {
     setMasterData({ ...masterData, members: newMembers });
   };
 
-  const handleManualAdd = () => {
-    if (!manualName.trim()) return;
+  const handleManualAdd = (e) => {
+    if (e) e.preventDefault();
+    const trimmedName = manualName.trim();
+    if (!trimmedName) return;
     
+    // Check if already in list
+    if (scannedData[activeTime].some(m => m.name === trimmedName)) {
+      showStatus("이미 추가된 이름입니다", "info");
+      setManualName("");
+      return;
+    }
+
     // Check if in master list
-    const masterInfo = masterData.members[manualName.trim()];
+    const masterInfo = masterData.members[trimmedName];
     const newMember = masterInfo 
-      ? { name: manualName.trim(), rank: masterInfo.rank, type: masterInfo.type }
-      : { name: manualName.trim(), rank: "R3", type: "미등록" };
+      ? { name: trimmedName, rank: masterInfo.rank, type: masterInfo.type }
+      : { name: trimmedName, rank: "R3", type: "미등록" };
 
-    const newList = [...scannedData[activeTime], newMember];
-    const uniqueList = Array.from(new Map(newList.map(item => [item.name, item])).values());
-    
-    // Sort before saving: Type priority, then Name
-    const typePriority = { "운영진": 0, "본캐": 1, "부캐": 2, "미등록": 3 };
-    uniqueList.sort((a, b) => (typePriority[a.type] || 4) - (typePriority[b.type] || 4) || a.name.localeCompare(b.name, 'ko'));
+    const uniqueList = Array.from(new Map([...scannedData[activeTime], newMember].map(item => [item.name, item])).values());
+    const sortedList = sortParticipationList(uniqueList);
 
-    const updated = { ...scannedData, [activeTime]: uniqueList };
+    const updated = { ...scannedData, [activeTime]: sortedList };
     setScannedData(updated);
-    saveParticipation(activeTime, uniqueList);
+    saveParticipation(activeTime, sortedList);
     setManualName("");
+    showStatus(`${trimmedName}님 추가 완료`, "success");
+  };
+
+  const handleResetParticipation = () => {
+    const input = window.prompt("정말로 명단을 초기화하시겠습니까? 초기화를 원하시면 '초기화'라고 입력해주세요.");
+    if (input === "초기화") {
+      const updated = { ...scannedData, [activeTime]: [] };
+      setScannedData(updated);
+      saveParticipation(activeTime, []);
+      showStatus(`${activeTime} 명단이 초기화되었습니다`, "success");
+    } else if (input !== null) {
+      showStatus("문구가 일치하지 않아 취소되었습니다", "error");
+    }
+  };
+
+  const sortParticipationList = (list) => {
+    const typePriority = { "운영진": 0, "본캐": 1, "부캐": 2, "미등록": 3 };
+    return [...list].sort((a, b) => 
+      (typePriority[a.type] ?? 4) - (typePriority[b.type] ?? 4) || 
+      a.name.localeCompare(b.name, 'ko')
+    );
   };
 
   const handleDelete = (name) => {
@@ -231,30 +254,37 @@ const App = () => {
       </div>
 
       {/* 2. Manual Input (Secondary Action) */}
-      <div className={`${THEME.card} rounded-[1.5rem] p-3 flex gap-2 shadow-sm`}>
+      <form 
+        onSubmit={handleManualAdd}
+        className={`${THEME.card} rounded-[1.5rem] p-3 flex gap-2 shadow-sm`}
+      >
         <input 
           type="text" 
           value={manualName}
           onChange={(e) => setManualName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleManualAdd()}
           placeholder="추가할 닉네임 직접 입력..."
           className="flex-1 bg-slate-50/50 border-none rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 ring-blue-100 placeholder:text-slate-300"
         />
         <button 
-          onClick={handleManualAdd}
+          type="submit"
           className={`bg-slate-900 text-white px-6 rounded-xl font-black text-sm ${THEME.button}`}
         >
           추가
         </button>
-      </div>
+      </form>
 
       {/* 3. List Area */}
       <div className={`${THEME.card} rounded-[2rem] overflow-hidden shadow-2xl shadow-blue-900/5`}>
         <div className="p-5 flex justify-between items-center border-b border-slate-50 bg-slate-50/30">
           <span className="text-[13px] font-black text-slate-800 uppercase tracking-tight">참여 명단 ({scannedData[activeTime].length}명)</span>
-          <button onClick={() => fetchParticipation(activeTime)} className="p-2 hover:bg-white rounded-full transition-colors group">
-            <RefreshCw size={14} className="text-slate-300 group-hover:text-blue-500" />
-          </button>
+          <div className="flex gap-1">
+            <button onClick={handleResetParticipation} className="p-2 hover:bg-white rounded-full transition-colors group" title="초기화">
+              <Trash2 size={14} className="text-slate-300 group-hover:text-rose-500" />
+            </button>
+            <button onClick={() => fetchParticipation(activeTime)} className="p-2 hover:bg-white rounded-full transition-colors group" title="새로고침">
+              <RefreshCw size={14} className="text-slate-300 group-hover:text-blue-500" />
+            </button>
+          </div>
         </div>
 
         <div className="max-h-[380px] overflow-y-auto px-4 py-3 space-y-2.5">
@@ -290,12 +320,12 @@ const App = () => {
         <div className="p-6 bg-slate-50/50 border-t border-slate-50">
           <button 
             onClick={copyToClipboard}
-            className={`w-full py-4.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl font-black shadow-xl shadow-blue-200 flex items-center justify-center gap-2.5 ${THEME.button}`}
+            className={`w-full py-3.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl font-black shadow-xl shadow-blue-200 flex items-center justify-center gap-2.5 ${THEME.button}`}
           >
-            <Copy size={20} /> 명단 복사하기
+            <Copy size={18} /> 명단 복사하기
           </button>
-          <button onClick={() => setView('admin')} className="w-full mt-5 flex items-center justify-center gap-1.5 text-[11px] font-black text-slate-300 hover:text-blue-500 transition-colors">
-            <Settings size={14} /> 마스터 명단 확인
+          <button onClick={() => setView('admin')} className="w-full mt-4 flex items-center justify-center gap-1.5 text-[13px] font-black text-slate-500 hover:text-blue-600 transition-colors">
+            <Settings size={16} /> 마스터 명단 확인
           </button>
         </div>
       </div>
@@ -305,7 +335,9 @@ const App = () => {
   const AdminView = () => {
     const rankPriority = { "R5": 0, "R4": 1, "R3": 2, "R2": 3, "R1": 4 };
     const members = Object.entries(masterData.members).sort((a, b) => {
-      const rankDiff = (rankPriority[a[1].rank] || 5) - (rankPriority[b[1].rank] || 5);
+      const aRank = a[1].rank?.toUpperCase() || "R1";
+      const bRank = b[1].rank?.toUpperCase() || "R1";
+      const rankDiff = (rankPriority[aRank] ?? 5) - (rankPriority[bRank] ?? 5);
       if (rankDiff !== 0) return rankDiff;
       return a[0].localeCompare(b[0], 'ko');
     });
@@ -389,7 +421,7 @@ const App = () => {
           </div>
           <h1 className="text-3xl font-black tracking-tight text-slate-900">
             WOS 요새쟁탈 <span className="text-blue-600">명단 PRO</span>
-            <span className="ml-2 text-[10px] bg-slate-100 text-slate-400 px-2 py-0.5 rounded-md align-middle font-bold">v1.4.0</span>
+            <span className="ml-2 text-[10px] bg-slate-100 text-slate-400 px-2 py-0.5 rounded-md align-middle font-bold">v1.4.1</span>
           </h1>
         </header>
 

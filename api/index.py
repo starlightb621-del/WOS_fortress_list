@@ -21,9 +21,6 @@ MASTER_LIST_FILE = os.path.join(os.path.dirname(__file__), "master_list.json")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     # [중요] 사용자의 요청에 따라 2.5 버전 이상 유지. 
-    # Gemini 3-flash가 작동하지 않을 경우를 대비해 기존 검증된 2.5-flash로 우선 복구하되,
-    # 최신 모델인 2.0-flash-exp 등을 고려할 수 있습니다. 
-    # 일단 사용자가 명시한 2.5-flash로 복구하여 작동 여부를 확인합니다.
     model = genai.GenerativeModel('gemini-2.5-flash')
 kv = None
 if REDIS_URL:
@@ -32,26 +29,18 @@ if REDIS_URL:
 # --- Helper Functions ---
 def clean_raw_name(name):
     if not name: return ""
-    # 1. 연맹 태그 및 괄호 제거
     name = re.sub(r'\[.*?\]', '', name)
     name = re.sub(r'\(.*?\)', '', name)
-    
-    # 2. 양 끝 특수문자 제거
     name = re.sub(r'^[^a-zA-Z0-9가-힣]+', '', name)
     name = re.sub(r'[^a-zA-Z0-9가-힣]+$', '', name)
-    
-    # 3. 한글 2자 이상 추출
     korean_match = re.search(r'([가-힣]{2,})', name)
     if korean_match:
         return korean_match.group(1).strip()
-        
     return name.strip()
 
 def levenshtein_distance(s1, s2):
-    if len(s1) < len(s2):
-        return levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
+    if len(s1) < len(s2): return levenshtein_distance(s2, s1)
+    if len(s2) == 0: return len(s1)
     previous_row = range(len(s2) + 1)
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
@@ -100,44 +89,54 @@ def scan_images():
 
     all_extracted_names = []
     system_instruction = (
-        "너는 WOS 게임의 연맹 관리자이다. 업로드된 스크린샷에서 모든 유저의 닉네임을 추출하라.\n"
-        "오직 닉네임만 추출할 것.\n"
+        "너는 WOS 게임의 연맹 관리자이다. 제공된 여러 장의 스크린샷을 모두 꼼꼼하게 분석하라.\n"
+        "각 스크린샷에 등장하는 모든 유저의 닉네임을 하나도 빠뜨리지 말고 추출해야 한다.\n"
+        "중복된 이름은 최종 결과에서 하나로 합치되, 모든 이미지의 데이터를 전수 조사하라.\n"
         "응답은 반드시 JSON Array [ \"이름1\", \"이름2\", ... ] 형식으로만 출력할 것."
     )
 
-    # 429 오류 방지를 위해 순차 처리하되, 이미지 한 장당 분석 품질을 높입니다.
+    # 할당량 보호를 위해 5장씩 묶음 처리 (Batching)
+    batch_size = 5
     errors = []
-    for i, b64 in enumerate(images_base64):
+    
+    for i in range(0, len(images_base64), batch_size):
+        batch = images_base64[i : i + batch_size]
         try:
-            parts = [system_instruction, {"mime_type": "image/jpeg", "data": b64}]
-            response = model.generate_content(parts)
+            parts = [system_instruction]
+            for b64 in batch:
+                parts.append({"mime_type": "image/jpeg", "data": b64})
             
-            if not response.text:
-                errors.append(f"Image {i+1}: AI가 텍스트를 생성하지 못했습니다. (Safety Filter 등)")
-                continue
+            response = model.generate_content(parts)
+            if response.text:
+                match = re.search(r'\[.*\]', response.text, re.DOTALL)
+                if match:
+                    names = json.loads(match.group())
+                    all_extracted_names.extend(names)
+                else:
+                    errors.append(f"Batch {i//batch_size + 1}: JSON 형식을 찾을 수 없습니다.")
+            
+            # 다음 배치 전 할당량 안정을 위해 잠시 대기
+            if len(images_base64) > batch_size:
+                time.sleep(1.5)
                 
-            match = re.search(r'\[.*\]', response.text, re.DOTALL)
-            if match:
-                names = json.loads(match.group())
-                all_extracted_names.extend(names)
-            else:
-                errors.append(f"Image {i+1}: JSON 형식을 찾을 수 없습니다.")
         except Exception as e:
-            errors.append(f"Image {i+1} Error: {str(e)}")
-            # 만약 429 오류라면 잠시 대기
+            errors.append(f"Batch {i//batch_size + 1} Error: {str(e)}")
             if "429" in str(e):
-                time.sleep(2)
+                time.sleep(5)
 
     if not all_extracted_names and errors:
-        return jsonify({"error": "; ".join(errors[:3])}), 500
+        return jsonify({"error": "; ".join(errors[:2])}), 500
 
-    # 매칭 엔진
+    # 매칭 엔진 적용
     master_data = get_master_list()
     members = master_data.get("members", {})
     results = []
     seen = set()
     
-    for raw_name in list(set(all_extracted_names)):
+    # 중복 제거 후 매칭
+    unique_extracted = list(set(all_extracted_names))
+    
+    for raw_name in unique_extracted:
         cleaned_raw = clean_raw_name(raw_name)
         if not cleaned_raw: continue
         
@@ -171,8 +170,7 @@ def scan_images():
 
 @app.route('/api/master', methods=['GET', 'POST'])
 def master_list_route():
-    if request.method == 'GET':
-        return jsonify(get_master_list())
+    if request.method == 'GET': return jsonify(get_master_list())
     else:
         data = request.json
         if kv: kv.set("master_list", json.dumps(data))

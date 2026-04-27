@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import concurrent.futures
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 import redis
@@ -19,7 +20,8 @@ MASTER_LIST_FILE = os.path.join(os.path.dirname(__file__), "master_list.json")
 # Initialize Gemini
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # [중요] 모델은 절대 1.5 버전으로 교체 금지. 2.5 버전 이상 유지. 현재 Gemini 3 Flash 사용.
+    model = genai.GenerativeModel('gemini-3-flash')
 kv = None
 if REDIS_URL:
     kv = redis.from_url(REDIS_URL, decode_responses=True)
@@ -27,20 +29,18 @@ if REDIS_URL:
 # --- Helper Functions ---
 def clean_raw_name(name):
     if not name: return ""
-    # 1.2 연맹 태그 제거 ([GOM] 등) - 트리밍 전에 먼저 수행
+    # 1. 연맹 태그 및 괄호 제거 ([GOM], (GOM) 등)
     name = re.sub(r'\[.*?\]', '', name)
     name = re.sub(r'\(.*?\)', '', name)
     
-    # 1.1 장식 문자 및 기호 제거 (시작/끝 특수문자)
+    # 2. 양 끝의 특수문자 및 기호 제거
     name = re.sub(r'^[^a-zA-Z0-9가-힣]+', '', name)
     name = re.sub(r'[^a-zA-Z0-9가-힣]+$', '', name)
     
-    # 1.2 한글 우선 추출 고도화 (한글 2자 이상이 포함되어 있으면 해당 부분을 우선 고려)
-    # 예: "미술랭곰~? X" -> "미술랭곰"
+    # 3. 한글이 포함된 경우, 한글 2자 이상의 핵심 부분 추출 (노이즈 제거)
     korean_match = re.search(r'([가-힣]{2,})', name)
     if korean_match:
-        # 한글 뒤에 공백이나 기호가 오고 영문이 오는 경우 등 처리
-        return korean_match.group(1)
+        return korean_match.group(1).strip()
         
     return name.strip()
 
@@ -66,28 +66,29 @@ def calculate_score(raw, master):
     r = re.sub(r'[^a-zA-Z0-9가-힣]', '', raw).upper()
     m = re.sub(r'[^a-zA-Z0-9가-힣]', '', master).upper()
     
-    # 2.2 우선순위 필터링
+    if not r or not m: return 0
+    
     # 1. 완전 일치
     if r == m:
         return 100
     
-    # 별칭(괄호 안) 체크
+    # 2. 별칭(괄호 안) 체크
     alias_match = re.search(r'\((.*?)\)', master)
     if alias_match:
         alias = re.sub(r'[^a-zA-Z0-9가-힣]', '', alias_match.group(1)).upper()
-        if r == alias or alias in r:
+        if r == alias or alias == r:
             return 100
 
-    # 2. 포함 관계 (알파뉴메릭 코어 기준)
-    if r and m and (r in m or m in r):
+    # 3. 포함 관계
+    if r in m or m in r:
         return 90
         
-    # 3. 유사도 매칭 (Levenshtein)
-    if not r or not m: return 0
+    # 4. 유사도 매칭 (Levenshtein)
     dist = levenshtein_distance(r, m)
     max_len = max(len(r), len(m))
     score = (1 - dist / max_len) * 100
     return score
+
 def get_master_list():
     if kv:
         data = kv.get("master_list")
@@ -131,34 +132,39 @@ def scan_images():
 
     all_extracted_names = []
     
-    # 4. AI 프롬프트 가이드라인 적용
+    # AI 프롬프트 가이드라인
     system_instruction = (
         "너는 WOS 게임의 연맹 관리자이다. 업로드된 스크린샷에서 모든 유저의 닉네임을 추출하라.\n"
         "오직 닉네임만 추출할 것.\n"
-        "중복된 이름은 하나로 합칠 것.\n"
         "응답은 반드시 JSON Array [ \"이름1\", \"이름2\", ... ] 형식으로만 출력할 것."
     )
 
+    def analyze_single_image(b64):
+        try:
+            parts = [system_instruction, {"mime_type": "image/jpeg", "data": b64}]
+            response = model.generate_content(parts)
+            text = response.text
+            match = re.search(r'\[.*\]', text, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+        except Exception as e:
+            print(f"Image analysis error: {e}")
+        return []
+
     try:
-        # Gemini 2.5 Flash Free Tier의 RPM(분당 요청 제한) 제한을 피하기 위해
-        # 여러 이미지를 하나의 generate_content 호출에 포함시켜 처리합니다.
-        # 이는 '병렬 처리'의 효과를 내면서도 429 오류를 방지하는 가장 효율적인 방법입니다.
-        parts = [system_instruction]
-        for b64 in images_base64:
-            parts.append({"mime_type": "image/jpeg", "data": b64})
-            
-        response = model.generate_content(parts)
-        text = response.text
+        # 병렬 처리 (RPM 제한 내에서 최대 성능)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_image = {executor.submit(analyze_single_image, b64): b64 for b64 in images_base64}
+            for future in concurrent.futures.as_completed(future_to_image):
+                all_extracted_names.extend(future.result())
+                
+        # 중복 제거
+        all_extracted_names = list(set(all_extracted_names))
         
-        # Extract JSON Array [ "이름1", "이름2", ... ]
-        match = re.search(r'\[.*\]', text, re.DOTALL)
-        if match:
-            names = json.loads(match.group())
-            all_extracted_names.extend(names)
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg:
-            return jsonify({"error": "Gemini API 할당량 초과 (429). 잠시 후 다시 시도해주세요. (무료 버전은 분당 요청 수가 제한되어 있습니다.)"}), 429
+            return jsonify({"error": "Gemini API 할당량 초과 (429). 잠시 후 다시 시도해주세요."}), 429
         return jsonify({"error": f"Gemini Error: {error_msg}"}), 500
 
     # 2. 매칭 엔진 적용

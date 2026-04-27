@@ -28,19 +28,17 @@ const THEME = {
 // --- WOS Roster Extractor Logic (v8) ---
 const cleanRawName = (name) => {
   if (!name) return "";
-  // 1.2 연맹 태그 제거 ([GOM] 등) - 트리밍 전 수행
+  // 1. 연맹 태그 제거 ([GOM] 등)
   let cleaned = name.replace(/\[.*?\]/g, "");
+  // 2. 괄호 내용 제거 (별칭 등)
   cleaned = cleaned.replace(/\(.*?\)/g, "");
   
-  // 1.1 장식 문자 및 기호 제거
-  cleaned = cleaned.replace(/^[^a-zA-Z0-9가-힣]+/, "");
-  cleaned = cleaned.replace(/[^a-zA-Z0-9가-힣]+$/, "");
+  // 3. 양 끝의 불필요한 특수문자 제거 (한자 \u4e00-\u9fff 포함)
+  cleaned = cleaned.replace(/^[^a-zA-Z0-9가-힣\u4e00-\u9fff]+/, "");
+  cleaned = cleaned.replace(/[^a-zA-Z0-9가-힣\u4e00-\u9fff]+$/, "");
   
-  // 1.2 한글 우선 추출 고도화
-  const koreanMatch = cleaned.match(/([가-힣]{2,})/);
-  if (koreanMatch) {
-    return koreanMatch[1];
-  }
+  // 4. 공백 정규화
+  cleaned = cleaned.replace(/\s+/g, " ");
   
   return cleaned.trim();
 };
@@ -67,23 +65,23 @@ const levenshteinDistance = (s1, s2) => {
 };
 
 const calculateScore = (raw, master) => {
-  // 특수문자 및 공백 제거 후 대문자 변환 비교
-  const r = raw.replace(/[^a-zA-Z0-9가-힣]/g, "").toUpperCase();
-  const m = master.replace(/[^a-zA-Z0-9가-힣]/g, "").toUpperCase();
+  // 특수문자, 기호, 공백을 모두 제거하고 비교 (한자 포함)
+  const r = raw.replace(/[^a-zA-Z0-9가-힣\u4e00-\u9fff]/g, "").toUpperCase();
+  const m = master.replace(/[^a-zA-Z0-9가-힣\u4e00-\u9fff]/g, "").toUpperCase();
 
-  // 2.2 우선순위 필터링
+  if (!r || !m) return 0;
   if (r === m) return 100;
 
   // 별칭(괄호 안) 체크
   const aliasMatch = master.match(/\((.*?)\)/);
   if (aliasMatch) {
-    const alias = aliasMatch[1].replace(/[^a-zA-Z0-9가-힣]/g, "").toUpperCase();
-    if (r === alias || alias.includes(r)) return 100;
+    const alias = aliasMatch[1].replace(/[^a-zA-Z0-9가-힣\u4e00-\u9fff]/g, "").toUpperCase();
+    if (r === alias || alias === r) return 100;
   }
 
-  if (r && m && (r.includes(m) || m.includes(r))) return 90;
+  // 포함 관계 체크
+  if (r.includes(m) || m.includes(r)) return 90;
 
-  if (!r || !m) return 0;
   const dist = levenshteinDistance(r, m);
   const maxLen = Math.max(r.length, m.length);
   return (1 - dist / maxLen) * 100;
@@ -456,8 +454,8 @@ const App = () => {
         });
       }));
       
-      // 할당량(429) 문제를 방지하면서 진행도를 표시하기 위해 5장씩 묶어서 처리
-      const CHUNK_SIZE = 5;
+      // 할당량(429) 문제를 방지하면서 진행도를 표시하기 위해 10장씩 묶어서 처리
+      const CHUNK_SIZE = 10;
       let combinedResults = [];
       
       for (let i = 0; i < images.length; i += CHUNK_SIZE) {

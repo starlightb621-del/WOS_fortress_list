@@ -20,7 +20,7 @@ MASTER_LIST_FILE = os.path.join(os.path.dirname(__file__), "master_list.json")
 # Initialize Gemini
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    # [중요] 사용자의 요청에 따라 2.5 버전 이상 유지. 
+    # [중요] 명세서 지침에 따라 2.5 버전 이상 유지 (1.5 사용 금지)
     model = genai.GenerativeModel('gemini-2.5-flash')
 kv = None
 if REDIS_URL:
@@ -29,13 +29,16 @@ if REDIS_URL:
 # --- Helper Functions ---
 def clean_raw_name(name):
     if not name: return ""
+    # 1. 연맹 태그 제거 ([GOM] 등)
     name = re.sub(r'\[.*?\]', '', name)
+    # 2. 괄호 내용 제거 (별칭 등)
     name = re.sub(r'\(.*?\)', '', name)
-    name = re.sub(r'^[^a-zA-Z0-9가-힣]+', '', name)
-    name = re.sub(r'[^a-zA-Z0-9가-힣]+$', '', name)
-    korean_match = re.search(r'([가-힣]{2,})', name)
-    if korean_match:
-        return korean_match.group(1).strip()
+    # 3. 양 끝의 불필요한 특수문자 제거 (한자 \u4e00-\u9fff 포함)
+    name = re.sub(r'^[^a-zA-Z0-9가-힣\u4e00-\u9fff]+', '', name)
+    name = re.sub(r'[^a-zA-Z0-9가-힣\u4e00-\u9fff]+$', '', name)
+    
+    # 4. 공백 정규화 (연속된 공백을 하나로)
+    name = re.sub(r'\s+', ' ', name)
     return name.strip()
 
 def levenshtein_distance(s1, s2):
@@ -53,15 +56,23 @@ def levenshtein_distance(s1, s2):
     return previous_row[-1]
 
 def calculate_score(raw, master):
-    r = re.sub(r'[^a-zA-Z0-9가-힣]', '', raw).upper()
-    m = re.sub(r'[^a-zA-Z0-9가-힣]', '', master).upper()
+    # 특수문자, 기호, 공백을 모두 제거하고 비교 (한자 포함)
+    r = re.sub(r'[^a-zA-Z0-9가-힣\u4e00-\u9fff]', '', raw).upper()
+    m = re.sub(r'[^a-zA-Z0-9가-힣\u4e00-\u9fff]', '', master).upper()
+    
     if not r or not m: return 0
     if r == m: return 100
+    
+    # 별칭(괄호 안) 체크
     alias_match = re.search(r'\((.*?)\)', master)
     if alias_match:
-        alias = re.sub(r'[^a-zA-Z0-9가-힣]', '', alias_match.group(1)).upper()
+        alias = re.sub(r'[^a-zA-Z0-9가-힣\u4e00-\u9fff]', '', alias_match.group(1)).upper()
         if r == alias or alias == r: return 100
+    
+    # 포함 관계 체크
     if r in m or m in r: return 90
+    
+    # 레벤슈타인 거리
     dist = levenshtein_distance(r, m)
     max_len = max(len(r), len(m))
     return (1 - dist / max_len) * 100
@@ -95,8 +106,8 @@ def scan_images():
         "응답은 반드시 JSON Array [ \"이름1\", \"이름2\", ... ] 형식으로만 출력할 것."
     )
 
-    # 할당량 보호를 위해 5장씩 묶음 처리 (Batching)
-    batch_size = 5
+    # 할당량 보호 및 효율을 위해 배치 사이즈 조정 (10장)
+    batch_size = 10
     errors = []
     
     for i in range(0, len(images_base64), batch_size):
@@ -117,12 +128,12 @@ def scan_images():
             
             # 다음 배치 전 할당량 안정을 위해 잠시 대기
             if len(images_base64) > batch_size:
-                time.sleep(1.5)
+                time.sleep(2.0)
                 
         except Exception as e:
             errors.append(f"Batch {i//batch_size + 1} Error: {str(e)}")
             if "429" in str(e):
-                time.sleep(5)
+                time.sleep(10) # 429 발생 시 더 길게 대기
 
     if not all_extracted_names and errors:
         return jsonify({"error": "; ".join(errors[:2])}), 500

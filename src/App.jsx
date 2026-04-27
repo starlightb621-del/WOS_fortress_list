@@ -454,12 +454,21 @@ const App = () => {
         });
       }));
       
-      // 할당량(429) 문제를 방지하면서 진행도를 표시하기 위해 10장씩 묶어서 처리
+      // 파일 읽기 완료 후 기본 진행도 표시
+      setProgress(10);
+      
       const CHUNK_SIZE = 10;
       let combinedResults = [];
+      const totalChunks = Math.ceil(images.length / CHUNK_SIZE);
       
       for (let i = 0; i < images.length; i += CHUNK_SIZE) {
+        const chunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
         const chunk = images.slice(i, i + CHUNK_SIZE);
+        
+        // 분석 시작 전 진행도 살짝 올림 (기대감 부여)
+        const startProgress = 10 + Math.round(((chunkIndex - 0.5) / totalChunks) * 90);
+        setProgress(startProgress);
+        
         const res = await fetch('/api/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -472,8 +481,9 @@ const App = () => {
         
         if (data.results) combinedResults.push(...data.results);
         
-        const currentProgress = Math.min(Math.round(((i + chunk.length) / images.length) * 100), 100);
-        setProgress(currentProgress);
+        // 배치 하나 완료 후 진행도 계산
+        const endProgress = 10 + Math.round((chunkIndex / totalChunks) * 90);
+        setProgress(Math.min(endProgress, 100));
       }
       
       const uniqueList = Array.from(new Map([...scannedData[activeTime], ...combinedResults].map(item => [item.name, item])).values());
@@ -481,12 +491,14 @@ const App = () => {
       const updated = { ...scannedData, [activeTime]: sortedList };
       setScannedData(updated);
       saveParticipation(activeTime, sortedList);
+      setProgress(100); // 최종 완료
       showStatus(`${combinedResults.length}명 추출 및 자동 보정 완료`, "success");
     } catch (err) {
       showStatus(err.message || "분석 중 오류 발생", "error");
     } finally {
       setLoading(false);
-      setProgress(0);
+      // 성공 시에는 잠시 100%를 보여주기 위해 바로 0으로 만들지 않음
+      setTimeout(() => setProgress(0), 1000);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
